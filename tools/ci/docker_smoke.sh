@@ -272,7 +272,7 @@ echo "all ${seats} player containers exited 0"
 # --------------------------------------------------------------------------
 # Assert the artifacts.
 # --------------------------------------------------------------------------
-if ! python3 - "${work_dir}" "${seats}" "${require_replay_json}" <<'PY'
+if ! python3 - "${work_dir}" "${seats}" "${require_replay_json}" "${manifest}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -280,6 +280,87 @@ from pathlib import Path
 work = Path(sys.argv[1])
 seats = int(sys.argv[2])
 require_replay_json = sys.argv[3] not in ("0", "", "false", "no")
+manifest_path = sys.argv[4]
+
+# --------------------------------------------------------------------------
+# results.json is validated against game.results_schema FROM THE MANIFEST --
+# the same schema the platform will apply -- not merely against a shape this
+# script happens to expect. jsonschema is not on a bare runner, so this is a
+# validator for exactly the keywords the schema uses; anything it has not been
+# taught is a hard failure rather than a silent skip, so a schema that grows a
+# keyword cannot quietly stop being checked.
+# --------------------------------------------------------------------------
+SUPPORTED = {
+    "$schema", "title", "description", "type", "properties", "required",
+    "additionalProperties", "items", "minItems", "maxItems", "enum",
+    "minimum", "maximum",
+}
+
+
+def schema_check(node, schema, path):
+    unknown = set(schema) - SUPPORTED
+    if unknown:
+        raise SystemExit(
+            f"RESULTS-SCHEMA FAIL: {path}: this checker does not implement "
+            f"{sorted(unknown)}; teach tools/ci/docker_smoke.sh or the schema "
+            "is being validated less strictly than the platform will"
+        )
+    kind = schema.get("type")
+    if kind == "object":
+        if not isinstance(node, dict):
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} is not an object")
+        for key in schema.get("required", []):
+            if key not in node:
+                raise SystemExit(f"RESULTS-SCHEMA FAIL: {path}.{key} is required")
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is False:
+            extra = sorted(set(node) - set(properties))
+            if extra:
+                raise SystemExit(
+                    f"RESULTS-SCHEMA FAIL: {path} carries undeclared keys {extra}"
+                )
+        for key, sub in properties.items():
+            if key in node:
+                schema_check(node[key], sub, f"{path}.{key}")
+    elif kind == "array":
+        if not isinstance(node, list):
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} is not an array")
+        if "minItems" in schema and len(node) < schema["minItems"]:
+            raise SystemExit(
+                f"RESULTS-SCHEMA FAIL: {path} has {len(node)} items, "
+                f"minItems {schema['minItems']}"
+            )
+        if "maxItems" in schema and len(node) > schema["maxItems"]:
+            raise SystemExit(
+                f"RESULTS-SCHEMA FAIL: {path} has {len(node)} items, "
+                f"maxItems {schema['maxItems']}"
+            )
+        if "items" in schema:
+            for i, item in enumerate(node):
+                schema_check(item, schema["items"], f"{path}[{i}]")
+    elif kind == "integer":
+        if isinstance(node, bool) or not isinstance(node, int):
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} is not an integer: {node!r}")
+    elif kind == "number":
+        if isinstance(node, bool) or not isinstance(node, (int, float)):
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} is not a number: {node!r}")
+    elif kind == "string":
+        if not isinstance(node, str):
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} is not a string: {node!r}")
+    elif kind == "boolean":
+        if not isinstance(node, bool):
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} is not a boolean: {node!r}")
+    elif kind is not None:
+        raise SystemExit(f"RESULTS-SCHEMA FAIL: {path}: unsupported type {kind!r}")
+    if kind in ("integer", "number"):
+        if "minimum" in schema and node < schema["minimum"]:
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} below minimum")
+        if "maximum" in schema and node > schema["maximum"]:
+            raise SystemExit(f"RESULTS-SCHEMA FAIL: {path} above maximum")
+    if "enum" in schema and node not in schema["enum"]:
+        raise SystemExit(
+            f"RESULTS-SCHEMA FAIL: {path} is {node!r}, not one of {schema['enum']}"
+        )
 
 failure = work / "player_failure.json"
 if failure.exists():
@@ -295,6 +376,15 @@ except Exception as exc:
     raise SystemExit(f"results.json is not valid UTF-8 JSON: {exc}") from exc
 if not isinstance(results, dict) or not results:
     raise SystemExit(f"results.json is not a non-empty object: {results!r}")
+
+schema = (json.load(open(manifest_path)).get("game") or {}).get("results_schema")
+if not isinstance(schema, dict) or not schema:
+    raise SystemExit(
+        "RESULTS-SCHEMA FAIL: the manifest declares no game.results_schema, so "
+        "results.json cannot be validated against the schema the platform uses"
+    )
+schema_check(results, schema, "results")
+print("results.json validates against game.results_schema")
 
 for key in ("names", "scores"):
     if key in results:
