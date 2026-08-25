@@ -41,6 +41,7 @@ type
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
     viewers: Table[WebSocket, ViewerState]
+    eventsSent: int          ## sim.events already broadcast to spectators
     started: bool
     finished: bool
     shuttingDown: bool
@@ -74,15 +75,6 @@ proc writeArtifact(uri, data, contentType, methodEnv: string) =
   else:
     writeCogameUri(uri, data, contentType, methodEnv)
 
-proc chromeFrame(gs: var GameState, socket: WebSocket): string =
-  var viewer = gs.viewers.getOrDefault(socket, initViewerState())
-  let sendLead = not viewer.leadSent and gs.sim.frames.len > 0
-  let view = chromeViewOfSim(gs.sim, newJArray(), sendLead)
-  if sendLead:
-    viewer.leadSent = true
-  gs.viewers[socket] = viewer
-  buildStateJson(view)
-
 proc broadcastLocked(gs: var GameState) =
   ## Callers hold stateLock. Spectators get the board packet plus the chrome
   ## frame; players get their own redacted observation.
@@ -104,10 +96,17 @@ proc broadcastLocked(gs: var GameState) =
   var sockets: seq[WebSocket]
   for socket in gs.globalSockets:
     sockets.add(socket)
+  ## The events emitted since the last broadcast, so the live feed draws the
+  ## same rows the static replay does. Without them `events` was always empty
+  ## and the game block's feed never ran on a live spectator.
+  var events = newJArray()
+  if gs.sim.events.len > gs.eventsSent:
+    events = eventsJson(gs.sim.events[gs.eventsSent ..< gs.sim.events.len])
+  gs.eventsSent = gs.sim.events.len
   for socket in sockets:
     var viewer = gs.viewers.getOrDefault(socket, initViewerState())
     let sendLead = not viewer.leadSent
-    let view = chromeViewOfSim(gs.sim, newJArray(), sendLead)
+    let view = chromeViewOfSim(gs.sim, events, sendLead)
     if sendLead:
       viewer.leadSent = true
     let packet = viewer.buildPacket(board, view, bare, buildStateJson(view))
