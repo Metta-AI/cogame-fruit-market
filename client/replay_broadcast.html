@@ -2454,6 +2454,7 @@ body[data-embed] #board { top: 0; height: 100%; }
   // NEVER named markBeat: that name is the chrome alias, and a hoisted
   // declaration would shadow it for the whole IIFE (tandem, 2026-08-23).
   var beatsDone = false;
+  var beatEls = [];
   var BEAT_LABEL = {
     round: 'round', firsttrade: 'first trade', starve: 'a cog starts starving',
     famine: 'famine', gameover: 'final tick'
@@ -2489,10 +2490,30 @@ body[data-embed] #board { top: 0; height: 100%; }
         if (seek) seek('s:' + b.t);
       });
       scrub.appendChild(el);
+      el.__tick = b.t;
+      beatEls.push(el);
       // The verdict is only known once the frame carries `over`; placing it
       // from the beat alone would cap the rail with a guess. The gameover
       // frame's renderMarketEndcard does it instead.
     });
+  }
+
+  // The chrome's own applySpoilers walks only the markers markBeat placed, and
+  // these are the block's own <button>s (labelled and clickable, which the
+  // chrome's <div> markers are not). Run the same gate over them, from the
+  // chrome's own toggle, so ?spoilers=0 holds every market beat — gameover
+  // included — back until the playhead reaches it.
+  function applyMarketSpoilers(s, C) {
+    if (!beatEls.length) return;
+    var show = !C || !C.getSpoilers || C.getSpoilers();
+    for (var i = 0; i < beatEls.length; i++) {
+      var el = beatEls[i];
+      var hide = !show && el.__tick > s.t;
+      if (el.__hidden !== hide) {
+        el.__hidden = hide;
+        el.style.display = hide ? 'none' : '';
+      }
+    }
   }
 
   // ---- roster strip -------------------------------------------------------
@@ -2666,6 +2687,7 @@ body[data-embed] #board { top: 0; height: 100%; }
       renderBook(s);
       renderMarketClock(s);
       buildMarketBeats(s, seek, C);
+      applyMarketSpoilers(s, C);
       if (s.events && s.events.length && !jumped) {
         for (var i = 0; i < s.events.length; i++) {
           applyMarketEvent(s.events[i], s);

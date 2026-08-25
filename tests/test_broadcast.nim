@@ -155,6 +155,15 @@ suite "the appended game block":
     check "buildMarketBeats" in page
     check "function markBeat" notin page
 
+  test "the appended beat markers are held back by ?spoilers=0":
+    ## chrome_common.js's applySpoilers walks only the markers ITS markBeat
+    ## placed. The block builds its own labelled <button>s, so it runs the same
+    ## gate over them from the chrome's own toggle — otherwise every beat,
+    ## `gameover` included, is on the rail from the first frame.
+    check "applyMarketSpoilers" in page
+    check "C.getSpoilers()" in page
+    check "el.__tick = b.t;" in page
+
   test "no game-block function name collides with the chrome alias list":
     let banner = page.find("fruit-market additions to the inherited")
     check banner > 0
