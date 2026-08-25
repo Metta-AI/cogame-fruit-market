@@ -551,6 +551,16 @@ proc buildPacket*(state: var ViewerState, board: ReplayBoard,
   result.addSprite(BroadcastChromeSpriteId, 1, 1, [0'u8, 0, 0, 0], chrome)
   state.frameCounter.inc
 
+proc steppedSpeed(current, step: int): int =
+  ## The `+` / `-` transport keys walk the SAME speed ladder the number keys
+  ## select from (paintbot's `applySpeedCommand`). The page sends them; without
+  ## this they fell through to `else: discard` and did nothing.
+  var index = 0
+  for i, value in PlaybackSpeeds:
+    if value == current:
+      index = i
+  PlaybackSpeeds[clamp(index + step, 0, PlaybackSpeeds.high)]
+
 proc advanceReplay*(state: var ViewerState, replay: Replay) =
   ## Applies the queued transport commands and advances the playhead one
   ## presentation frame. A seek that arrives before the first chrome frame is
@@ -564,7 +574,9 @@ proc advanceReplay*(state: var ViewerState, replay: Replay) =
     of ',': state.index = 0
     of 'e': state.index = last
     of 'r': state.looping = not state.looping
-    of 'f': discard
+    of 'f': discard      ## skip-lulls: this game ships no lull spans
+    of '+', '=': state.speed = steppedSpeed(state.speed, 1)
+    of '-', '_': state.speed = steppedSpeed(state.speed, -1)
     of '1': state.speed = 1
     of '2': state.speed = 2
     of '3': state.speed = 3

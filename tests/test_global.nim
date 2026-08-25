@@ -92,6 +92,35 @@ proc bench(): Sim =
   config.seed = 3
   initSim(config)
 
+suite "the transport keys the page sends":
+  test "+ and - walk the same speed ladder the number keys select from":
+    var sim = bench()
+    sim.setRoundOrders(default(array[Seats, Order]))
+    sim.stepTick()
+    let replay = parseReplay($replayJson(sim, sim.resultsJson()))
+    var state = initViewerState()
+    check state.speed == 1
+    state.commands = @['+']
+    state.advanceReplay(replay)
+    check state.speed == 2
+    state.commands = @['+', '+']
+    state.advanceReplay(replay)
+    check state.speed == 4
+    state.commands = @['-']
+    state.advanceReplay(replay)
+    check state.speed == 3
+    ## The ladder ends where PlaybackSpeeds ends, in both directions.
+    state.commands = @['+', '+', '+', '+', '+']
+    state.advanceReplay(replay)
+    check state.speed == PlaybackSpeeds[^1]
+    state.commands = @['-', '-', '-', '-', '-', '-', '-']
+    state.advanceReplay(replay)
+    check state.speed == PlaybackSpeeds[0]
+    ## And a numeric key still selects directly.
+    state.commands = @['8']
+    state.advanceReplay(replay)
+    check state.speed == 8
+
 suite "every drawn overlay fits the board":
   test "a full bubble, a tag, a bar and an alias on every seat, at the edges":
     ## The four extreme legal rows and columns: a cog at the top of the arena
