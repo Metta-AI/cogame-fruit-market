@@ -224,7 +224,7 @@ proc stepHungerStamina(sim: var Sim) =
 
 # --- step 9 -----------------------------------------------------------------
 
-proc recordFrame(sim: var Sim) =
+proc recordFrame*(sim: var Sim) =
   if not sim.recordFrames:
     return
   var frame = Frame(t: sim.tick)
@@ -367,6 +367,13 @@ proc endEarly*(sim: var Sim) =
   sim.finish("deadline", "deadline")
 
 proc forfeit*(sim: var Sim) =
+  ## Nobody connected inside playerConnectTimeoutSeconds. Scores are all zero
+  ## and the artifacts are still written — and the replay is still PLAYABLE:
+  ## record the opening state, because a replay with an empty `frames` array is
+  ## one `parseReplay` refuses ("replay carries no frames"), which is a viewer
+  ## that reports data-replay-error instead of showing the forfeited board.
+  if sim.frames.len == 0:
+    sim.recordFrame()
   sim.finish("forfeit", "forfeit")
 
 proc runRound*(sim: var Sim) =
