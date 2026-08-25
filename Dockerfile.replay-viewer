@@ -25,6 +25,7 @@ RUN nim c -d:emscripten replay-viewer/fruit_market_replay.nim && \
     > replay-viewer/dist/wire_constants.js && \
   cp client/broadcast_core.js replay-viewer/dist/broadcast_core.js && \
   cp client/chrome_common.js replay-viewer/dist/chrome_common.js && \
+  cp data/font.ttf replay-viewer/dist/font.ttf && \
   cp replay-viewer/static_replay.js replay-viewer/dist/static_replay.js && \
   cp replay-viewer/static_replay_worker.js \
     replay-viewer/dist/static_replay_worker.js && \
@@ -40,6 +41,7 @@ RUN nim c -d:emscripten replay-viewer/fruit_market_replay.nim && \
   test -f replay-viewer/dist/fruit_market_replay.data && \
   test -f replay-viewer/dist/static_replay_worker.js && \
   test -f replay-viewer/dist/index.html && \
+  test -s replay-viewer/dist/font.ttf && \
   test -s replay-viewer/dist/wire_constants.js && \
   grep -q '^window.CTF_WIRE={' replay-viewer/dist/wire_constants.js && \
   grep -q 'wire_constants.js' replay-viewer/dist/index.html && \

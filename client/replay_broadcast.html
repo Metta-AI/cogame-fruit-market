@@ -2489,10 +2489,9 @@ body[data-embed] #board { top: 0; height: 100%; }
         if (seek) seek('s:' + b.t);
       });
       scrub.appendChild(el);
-      if (b.k === 'gameover' && C && C.setVerdict) {
-        C.setVerdict({ t: b.t, winner: (s.over && s.over.winner) || 'apple',
-          draw: !!(s.over && s.over.draw) });
-      }
+      // The verdict is only known once the frame carries `over`; placing it
+      // from the beat alone would cap the rail with a guess. The gameover
+      // frame's renderMarketEndcard does it instead.
     });
   }
 
@@ -2612,21 +2611,35 @@ body[data-embed] #board { top: 0; height: 100%; }
   }
 
   // ---- endcard ------------------------------------------------------------
-  function renderMarketEndcard(s) {
+  var verdictPlaced = false;
+  function renderMarketEndcard(s, C) {
     var o = s.over;
     if (!o) return;
+    if (!verdictPlaced && C && C.setVerdict) {
+      verdictPlaced = true;
+      C.setVerdict({ t: s.mx, winner: o.winner, draw: !!o.draw });
+    }
     var head = $('ec-headline');
     var cond = $('ec-wincond');
     var how = $('ec-how');
+    // Every seat whose score equals the maximum is a winner: a mixed-motive
+    // market needs no tiebreak, so a tie is named as a tie and both aliases
+    // are read out rather than one of them being picked arbitrarily.
+    var top = [];
+    (o.scores || []).forEach(function (score, i) {
+      if (score === o.winnerScore) {
+        top.push(String((o.aliases && o.aliases[i]) || ('#' + i)).toUpperCase());
+      }
+    });
     if (head) {
-      head.textContent = o.draw
-        ? 'DRAW \u2014 ' + (o.ending || '')
-        : String(o.winnerAlias || '').toUpperCase() + ' WINS';
+      head.textContent = top.length > 1
+        ? top.join(' & ') + ' TIE'
+        : (top[0] || '\u2014') + ' WINS';
     }
     if (cond) cond.textContent = o.ending || '';
     if (how) {
-      how.textContent = 'winner ' + (o.winnerAlias || '') + ' \u00b7 ' +
-        (o.winnerPolicy || '') + ' \u00b7 ' + (o.winnerScore || 0) + ' points';
+      how.textContent = (top.length > 1 ? 'tied on ' : 'winner ' +
+        (o.winnerPolicy || '') + ' on ') + (o.winnerScore || 0) + ' points';
     }
     var line = $('fm-endline');
     if (!line) {
@@ -2658,7 +2671,7 @@ body[data-embed] #board { top: 0; height: 100%; }
           applyMarketEvent(s.events[i], s);
         }
       }
-      if (s.ph === 'gameover') renderMarketEndcard(s);
+      if (s.ph === 'gameover') renderMarketEndcard(s, C);
       lastTick = s.t;
     }
   };
