@@ -1,8 +1,34 @@
 ## tests/test_sim.nim — sim units and determinism.
 
-import std/[tables, unittest]
+import std/[os, osproc, strutils, tables, unittest]
 
 import fruit_market/sim, fruit_market/scripted
+
+proc episodeHash*(seed: int): uint64 =
+  ## One all-hauler episode, played to its natural end. The determinism test
+  ## runs this twice in this process and once in a FRESH process (below).
+  var config = defaultGameConfig()
+  config.seed = seed
+  config.rounds = 12
+  var sim = initSim(config)
+  while not sim.done:
+    var orders: array[Seats, Order]
+    for slot in 0 ..< Seats:
+      orders[slot] = scriptedOrder(sim, slot, skHauler)
+    sim.setRoundOrders(orders)
+    sim.runRound()
+  doAssert sim.ticksPlayed == 720
+  sim.gameHash()
+
+const HashFlag = "--emit-game-hash"
+
+## A FRESH SERVER, not a second call: re-exec this binary with the flag and it
+## plays the episode from a cold process and prints the hash. Anything that
+## made the sim depend on process state — a global left set by an earlier test,
+## an address, a clock — shows up as a different number.
+if paramCount() >= 2 and paramStr(1) == HashFlag:
+  echo episodeHash(parseInt(paramStr(2)))
+  quit(0)
 
 proc freshSim(seed = 1): Sim =
   var config = defaultGameConfig()
@@ -314,19 +340,17 @@ suite "the seeded farm-type shuffle":
 
 suite "determinism":
   test "the same seed and the same orders give the same gameHash":
-    proc run(): uint64 =
-      var config = defaultGameConfig()
-      config.seed = 4242
-      config.rounds = 12
-      var sim = initSim(config)
-      while not sim.done:
-        var orders: array[Seats, Order]
-        for slot in 0 ..< Seats:
-          orders[slot] = scriptedOrder(sim, slot, skHauler)
-        sim.setRoundOrders(orders)
-        sim.runRound()
-      check sim.ticksPlayed == 720
-      sim.gameHash()
-    let first = run()
-    let second = run()
+    let first = episodeHash(4242)
+    let second = episodeHash(4242)
     check first == second
+    ## A different seed is a different episode, or the hash proves nothing.
+    check episodeHash(4243) != first
+
+  test "and the same hash again across a fresh server":
+    ## Twice in one process AND across a fresh process: the second half is what
+    ## catches a sim that quietly depends on something the process carried in.
+    let inProcess = episodeHash(4242)
+    let child = execProcess(getAppFilename(), args = [HashFlag, "4242"],
+      options = {})
+    check child.strip().len > 0
+    check child.strip() == $inProcess

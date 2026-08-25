@@ -1,6 +1,6 @@
 ## tests/test_broadcast.nim — the chrome frame and the appended game block.
 
-import std/[algorithm, json, os, strutils, unittest]
+import std/[algorithm, json, os, strutils, unicode, unittest]
 
 import fruit_market/sim, fruit_market/scripted, fruit_market/replays,
   fruit_market/broadcast
@@ -152,6 +152,64 @@ suite "the chrome frame":
           check chebyshev(x, y, replay.board.stalls[parseEnum[StallId](stall)].x,
             replay.board.stalls[parseEnum[StallId](stall)].y) <= 1
     check sawStall
+
+  test "every feed row's text is inside the caps the server enforces":
+    ## The feed rows are BUILT HERE the way the page builds them — one row per
+    ## trade, one per offer with the seat's `say` quoted on the end of it, one
+    ## per starve/exhausted — and the longest one that this episode can produce
+    ## has to fit the budget the 360 px feed was sized for. Every string that
+    ## can land in a row is capped server-side; this is where the composed row
+    ## is checked rather than its parts.
+    const MaxFeedRowLen = 200
+    var says: array[Seats, string]
+    var rows = 0
+    var longest = 0
+    var longestRow = ""
+    proc alias(slot: int): string = replay.names[slot].toUpperAscii()
+    for row in replay.events:
+      var text = ""
+      case row["k"].getStr()
+      of "order":
+        let seat = row["seat"].getInt()
+        says[seat] = row["say"].getStr()
+        check says[seat].runeLen <= MaxSayLen
+        check row["notes"].getStr().runeLen <= MaxNotesLen
+        check validateUtf8(says[seat]) == -1
+        check validateUtf8(row["notes"].getStr()) == -1
+        continue
+      of "offer":
+        let seat = row["seat"].getInt()
+        text = alias(seat) & " posts " & $row["giveN"].getInt() & " " &
+          row["give"].getStr() & " for " & $row["wantN"].getInt() & " " &
+          row["want"].getStr() & " auto"
+        if says[seat].len > 0:
+          text.add(" \u201c" & says[seat] & "\u201d")
+      of "trade":
+        text = alias(row["a"].getInt()) & " " & $row["aGiveN"].getInt() &
+          " apples <-> " & $row["bGiveN"].getInt() & " bananas " &
+          alias(row["b"].getInt()) & " \u00b7 " &
+          $row["applesPerBanana"].getInt()
+      of "starve":
+        text = alias(row["seat"].getInt()) & " IS STARVING"
+      of "exhausted":
+        text = alias(row["seat"].getInt()) & " COLLAPSED \u2014 0 stamina"
+      else:
+        continue
+      rows.inc
+      check validateUtf8(text) == -1
+      check text.runeLen <= MaxFeedRowLen
+      if text.runeLen > longest:
+        longest = text.runeLen
+        longestRow = text
+    check rows > 0
+    ## The cap has to be doing work: the longest row this fixture drew is
+    ## reported so a future change that blows past it is visible.
+    checkpoint("longest feed row (" & $longest & " runes): " & longestRow)
+    check longest > 0
+    ## The roster chip and the endcard carry the POLICY name, the one string
+    ## in the chrome that does not come from this repo.
+    for slot in 0 ..< Seats:
+      check replay.policyNames[slot].runeLen <= MaxPolicyNameLen
 
   test "the clock block spells the round out":
     check mid["fm"]["round"].getInt() >= 1
