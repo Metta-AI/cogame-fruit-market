@@ -233,6 +233,15 @@ suite "the appended game block":
       check ("function " & alias & "(") notin appended
       check ("function " & alias & " (") notin appended
 
+  test "the seat's say is the quoted tail of its offer row":
+    ## One row per offer (tagged `auto` when the order was a fallback or a
+    ## scripted baseline), with the say quoted on the end of it. The tag and
+    ## the say ride the `order` event, which the sim emits at the same tick,
+    ## so the block joins the batch by seat before drawing any of it.
+    check "function applyMarketEvents(" in page
+    check "autoTag(order.source)" in page
+    check "order.say ?" in page
+
   test "the plate sub-line draws the trade count and the mean rate":
     check ".fm-plate-sub" in page
     check "renderPlateSub" in page

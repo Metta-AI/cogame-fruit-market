@@ -2657,7 +2657,27 @@ body[data-embed] #board { top: 0; height: 100%; }
     }
     return '#' + slot;
   }
-  function applyMarketEvent(e, s) {
+  function autoTag(source) {
+    return (source === 'fallback' || source === 'scripted')
+      ? ' <span class="badge">auto</span>' : '';
+  }
+  // One row per offer, per trade and per starve/exhausted, with the seat's
+  // `say` as the QUOTED TAIL of its offer row. The `say` and the decision
+  // `source` ride the `order` event, which the sim emits at the same tick,
+  // just before the `offer` it produced — so the batch is joined by seat
+  // before any of it is drawn. A seat that says something without posting an
+  // offer still gets its own row; nothing said is dropped.
+  function applyMarketEvents(events, s) {
+    var orders = {}, offered = {};
+    events.forEach(function (e) {
+      if (e.k === 'order') orders[e.seat] = e;
+      if (e.k === 'offer') offered[e.seat] = true;
+    });
+    events.forEach(function (e) { applyMarketEvent(e, s, orders, offered); });
+  }
+  function applyMarketEvent(e, s, orders, offered) {
+    orders = orders || {};
+    offered = offered || {};
     switch (e.k) {
       case 'trade':
         pushMarketFeed(
@@ -2671,17 +2691,18 @@ body[data-embed] #board { top: 0; height: 100%; }
         clearedUntil[e.b] = s.t + CLEARED_TICKS;
         break;
       case 'offer':
+        var order = orders[e.seat] || {};
         pushMarketFeed(
           '<b>' + esc(aliasOf(s, e.seat)) + '</b> posts ' + e.giveN + ' ' +
           (FRUIT[e.give] || '') + ' for ' + e.wantN + ' ' +
-          (FRUIT[e.want] || ''), 'offer');
+          (FRUIT[e.want] || '') + autoTag(order.source) +
+          (order.say ? ' \u201c' + esc(order.say) + '\u201d' : ''), 'offer');
         break;
       case 'order':
-        if (e.say) {
-          var tag = (e.source === 'fallback' || e.source === 'scripted')
-            ? ' <span class="badge">auto</span>' : '';
+        // Already drawn as the tail of this seat's offer row.
+        if (e.say && !offered[e.seat]) {
           pushMarketFeed('<b>' + esc(aliasOf(s, e.seat)) + '</b> \u201c' +
-            esc(e.say) + '\u201d' + tag, 'say');
+            esc(e.say) + '\u201d' + autoTag(e.source), 'say');
         }
         break;
       case 'starve':
@@ -2754,9 +2775,7 @@ body[data-embed] #board { top: 0; height: 100%; }
       buildMarketBeats(s, seek, C);
       applyMarketSpoilers(s, C);
       if (s.events && s.events.length && !jumped) {
-        for (var i = 0; i < s.events.length; i++) {
-          applyMarketEvent(s.events[i], s);
-        }
+        applyMarketEvents(s.events, s);
       }
       if (s.ph === 'gameover') renderMarketEndcard(s, C);
       lastTick = s.t;
