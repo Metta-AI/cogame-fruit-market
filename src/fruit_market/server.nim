@@ -398,6 +398,13 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           state.socketSlots.del(websocket)
           if state.playerSockets.getOrDefault(slot) == websocket:
             state.playerSockets.del(slot)
+            ## A seat whose socket DIES MID-EPISODE plays `hauler` for every
+            ## remaining round: decideAll gates on `connected`, so leaving it
+            ## set kept spending the operator's credentials on a prompt whose
+            ## process is gone.
+            state.connected[slot] = false
+            echo "fruit-market: player slot ", slot,
+              " disconnected; playing hauler for the rest of the episode"
         state.globalSockets.excl(websocket)
         state.viewers.del(websocket)
 
