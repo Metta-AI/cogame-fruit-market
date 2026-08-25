@@ -101,6 +101,16 @@ proc rosterJson(view: ChromeView): JsonNode =
       "starving": (cog.flags and FlagStarving) != 0
     })
 
+proc stallNameAt(x, y: int): string =
+  ## The stall this offer is standing at, or "" when the cog is out in the
+  ## board. The kernel's `market` job parks within Chebyshev 1 of the named
+  ## stall, so this is exactly "where you can meet it" — and it is derived from
+  ## the recorded cell, so the live frame and the replay frame agree.
+  for id in StallId:
+    if chebyshev(x, y, StallCells[id][0], StallCells[id][1]) <= 1:
+      return $id
+  ""
+
 proc bookJson(view: ChromeView): JsonNode =
   ## Every live offer, sorted by volume then slot — the "all offers logged"
   ## surface made visible.
@@ -116,7 +126,8 @@ proc bookJson(view: ChromeView): JsonNode =
       "giveN": cog.offerGiveN,
       "want": $fruitOfId(1 - cog.offerGive),
       "wantN": cog.offerWantN,
-      "unfunded": cog.offerUnfunded
+      "unfunded": cog.offerUnfunded,
+      "stall": stallNameAt(cog.x, cog.y)
     })
   rows.sort(proc (a, b: JsonNode): int =
     let volA = a["giveN"].getInt + a["wantN"].getInt

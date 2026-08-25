@@ -2389,6 +2389,7 @@ body[data-embed] #board { top: 0; height: 100%; }
   border-left: calc(3 * var(--u)) solid var(--cc, #e8a33d);
 }
 .fm-book-row.unfunded { opacity: 0.55; border-left-style: dashed; }
+.fm-book-row.cleared { opacity: 0.5; text-decoration: line-through; }
 .fm-book-row .fm-book-name { flex: 1 1 auto; min-width: 3.2em; overflow: hidden; text-overflow: ellipsis; }
 .fm-book-row .fm-book-stall { color: var(--paper-dim); }
 
@@ -2540,19 +2541,42 @@ body[data-embed] #board { top: 0; height: 100%; }
 
   // ---- order book ---------------------------------------------------------
   var bookKey = '';
+  var lastBookRow = {};      // slot -> the row html it last showed
+  var clearedUntil = {};     // slot -> tick its struck-through row expires
+  var CLEARED_TICKS = 48;
+  function bookRowHtml(r, cls) {
+    return '<div class="fm-book-row' + cls +
+      '" style="--cc:' + (COLORS[r.s] || '#e8a33d') + '">' +
+      '<span class="fm-book-name">' + esc(String(r.name).toUpperCase()) + '</span>' +
+      '<span>' + r.giveN + ' ' + (FRUIT[r.give] || '') + ' \u2192 ' +
+      r.wantN + ' ' + (FRUIT[r.want] || '') + '</span>' +
+      '<span class="fm-book-stall">' + esc(r.stall || '') + '</span>' +
+      '</div>';
+  }
   function renderBook(s) {
     var rows = (s.fm && s.fm.book) || [];
-    var key = JSON.stringify(rows);
+    // An executed offer is CONSUMED, so it leaves the book on the next frame.
+    // Its row is kept, struck through, for a beat, because "it cleared" is the
+    // one thing about an offer a spectator most wants to see.
+    var struck = [];
+    for (var slot in clearedUntil) {
+      if (clearedUntil[slot] > s.t && lastBookRow[slot]) struck.push(slot);
+    }
+    var key = JSON.stringify(rows) + '|' + struck.join(',');
     if (key === bookKey) return;
     bookKey = key;
     var html = '';
+    var live = {};
     rows.slice(0, 8).forEach(function (r) {
-      html += '<div class="fm-book-row' + (r.unfunded ? ' unfunded' : '') +
-        '" style="--cc:' + (COLORS[r.s] || '#e8a33d') + '">' +
-        '<span class="fm-book-name">' + esc(String(r.name).toUpperCase()) + '</span>' +
-        '<span>' + r.giveN + ' ' + (FRUIT[r.give] || '') + ' \u2192 ' +
-        r.wantN + ' ' + (FRUIT[r.want] || '') + '</span>' +
-        '</div>';
+      live[r.s] = true;
+      lastBookRow[r.s] = bookRowHtml(r, r.unfunded ? ' unfunded' : '');
+      html += lastBookRow[r.s];
+    });
+    struck.forEach(function (slot) {
+      if (!live[slot]) {
+        html += lastBookRow[slot].replace('class="fm-book-row',
+          'class="fm-book-row cleared');
+      }
     });
     bookRows.innerHTML = html;
   }
@@ -2605,6 +2629,10 @@ body[data-embed] #board { top: 0; height: 100%; }
           (FRUIT[e.aGive] || '') + ' \u21c4 ' + e.bGiveN + ' ' +
           (FRUIT[e.bGive] || '') + ' <b>' + esc(aliasOf(s, e.b)) + '</b>' +
           ' \u00b7 ' + rate(e.applesPerBanana), 'trade');
+        // Both offers are consumed by the trade: strike their book rows
+        // through for a beat before they drop off the panel.
+        clearedUntil[e.a] = s.t + CLEARED_TICKS;
+        clearedUntil[e.b] = s.t + CLEARED_TICKS;
         break;
       case 'offer':
         pushMarketFeed(

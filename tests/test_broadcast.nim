@@ -104,6 +104,28 @@ suite "the chrome frame":
       check row["give"].getStr() != row["want"].getStr()
       check row["name"].getStr().len > 0
 
+  test "a book row names the stall the offer stands at":
+    ## `ASH  3 apples -> 2 bananas  north`: the stall is the only meeting
+    ## protocol two wordless cogs have, so the row that advertises an offer
+    ## says where to find it. Derived from the recorded cell, so the live and
+    ## replay frames agree.
+    var sawStall = false
+    for index in 0 .. replay.frames.high:
+      let frame = parseJson(buildStateJson(
+        chromeViewOfReplay(replay, index, true, 1, false, false, newJArray())))
+      for row in frame["fm"]["book"]:
+        check row.hasKey("stall")
+        let stall = row["stall"].getStr()
+        check stall in ["", "north", "east", "south", "west"]
+        if stall.len > 0:
+          sawStall = true
+          let slot = row["s"].getInt()
+          let x = replay.frames[index].cogAt(slot, 0)
+          let y = replay.frames[index].cogAt(slot, 1)
+          check chebyshev(x, y, replay.board.stalls[parseEnum[StallId](stall)].x,
+            replay.board.stalls[parseEnum[StallId](stall)].y) <= 1
+    check sawStall
+
   test "the clock block spells the round out":
     check mid["fm"]["round"].getInt() >= 1
     check mid["fm"]["rounds"].getInt() == sim.config.rounds
@@ -183,6 +205,14 @@ suite "the appended game block":
     for alias in ChromeAliases:
       check ("function " & alias & "(") notin appended
       check ("function " & alias & " (") notin appended
+
+  test "a cleared offer's book row is struck through before it drops":
+    ## An executed offer is CONSUMED on both sides, so it leaves the book on
+    ## the next frame; the row is kept and struck through for a beat first.
+    check ".fm-book-row.cleared" in page
+    check "text-decoration: line-through" in page
+    check "clearedUntil[e.a]" in page
+    check "fm-book-stall" in page
 
   test "pushFeed keeps the starter's one-argument signature":
     ## Changing it is what broke cogball 0.1.4.
