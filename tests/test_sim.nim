@@ -26,6 +26,18 @@ proc parkEveryoneElse(sim: var Sim, keep: int) =
 proc restOrder(fruit: Fruit): Order =
   Order(job: jRest, fruit: fruit, eat: epNone, source: osScripted)
 
+suite "PLAYER_SCRIPTED":
+  test "only the two shipped baselines are selectable; mirror is not":
+    ## `mirror` is gate (d)'s book reader and lives in tests/test_feasibility.
+    ## It is not a shipped policy, so the production image must not field it
+    ## for a seat that asks for it by name.
+    check parseScriptKind("") == skNone
+    check parseScriptKind("hauler") == skHauler
+    check parseScriptKind("HOMESTEADER") == skHomesteader
+    check parseScriptKind("autarky") == skHomesteader
+    check parseScriptKind("mirror") == skHauler
+    check parseScriptKind("whatever") == skHauler
+
 suite "harvest":
   test "3 of your own fruit, 1 of the other, with the right cooldown":
     var sim = freshSim()

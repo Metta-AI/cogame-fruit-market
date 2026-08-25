@@ -243,12 +243,13 @@ proc other*(fruit: Fruit): Fruit =
   if fruit == fApple: fBanana else: fApple
 
 proc parseScriptKind*(text: string): ScriptKind =
-  ## PLAYER_SCRIPTED values. Anything unknown is `hauler`, the working
-  ## baseline every failed decision lands on.
+  ## PLAYER_SCRIPTED values. The two SHIPPED baselines only: `mirror` is gate
+  ## (d)'s book reader and lives in the test, so a seat that asks for it gets
+  ## `hauler` like any other unknown value — the working baseline every failed
+  ## decision lands on.
   case text.strip().toLowerAscii()
   of "": skNone
   of "homesteader", "autarky": skHomesteader
-  of "mirror": skMirror
   else: skHauler
 
 proc chebyshev*(ax, ay, bx, by: int): int =
