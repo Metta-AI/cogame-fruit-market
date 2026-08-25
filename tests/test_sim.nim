@@ -170,6 +170,34 @@ suite "hunger, stamina and eating":
         exhausted.inc
     check exhausted == 1
 
+  test "a move that spends the last stamina emits exhausted too":
+    ## The event table's condition is "stamina reached 0", not "the starvation
+    ## drain reached 0": a cog that pays its last point walking into the river
+    ## collapses in full view and the feed says so.
+    var sim = freshSim()
+    sim.cogs[0].farm = fApple
+    sim.parkEveryoneElse(0)
+    sim.placeAt(0, 10, 1)              ## clear of the parked seats at x 1..7
+    var orders: array[Seats, Order]
+    for slot in 0 ..< Seats:
+      orders[slot] = restOrder(sim.cogs[slot].farm)
+    sim.setRoundOrders(orders)
+    ## On an ODD tick, so the +1 regen of step 8 does not paper over it.
+    sim.stepTick()
+    sim.cogs[0].hunger = 50            ## not starving: only the move can do it
+    sim.cogs[0].stamina = sim.config.moveStaminaLand
+    sim.cogs[0].moveCd = 0
+    sim.stepMoveForTest(aMoveE, 0)
+    check sim.cogs[0].x == 11
+    check sim.cogs[0].stamina == 0
+    sim.stepTick()
+    check sim.cogs[0].exhausted
+    var exhausted = 0
+    for event in sim.events:
+      if event.kind == evExhausted and event.seat == 0:
+        exhausted.inc
+    check exhausted == 1
+
   test "stamina regenerates only while hunger is above 0":
     var sim = freshSim()
     var orders: array[Seats, Order]

@@ -206,13 +206,17 @@ proc stepHungerStamina(sim: var Sim) =
         cog.stamina = min(StaminaMax, cog.stamina + 1)
     else:
       cog.starvingTicks.inc
-      let before = cog.stamina
       cog.stamina = max(0, cog.stamina - sim.config.starveDrain)
-      if cog.stamina == 0 and before > 0:
-        cog.exhausted = true
-        sim.cogs[slot] = cog
-        sim.emit(SimEvent(kind: evExhausted, seat: slot))
-    cog.exhausted = cog.stamina == 0
+    ## `exhausted` fires wherever stamina REACHED 0 this tick — the starvation
+    ## drain, a move whose cost was exactly the stamina left, or a harvest at
+    ## stamina 1 — because the event table's condition is "stamina reached 0",
+    ## and a collapse with no feed row is a collapse the audience never sees.
+    let nowExhausted = cog.stamina == 0
+    if nowExhausted and not cog.exhausted:
+      cog.exhausted = true
+      sim.cogs[slot] = cog
+      sim.emit(SimEvent(kind: evExhausted, seat: slot))
+    cog.exhausted = nowExhausted
     if cog.moveCd > 0: cog.moveCd.dec
     if cog.harvestCd > 0: cog.harvestCd.dec
     if cog.eatCd > 0: cog.eatCd.dec
