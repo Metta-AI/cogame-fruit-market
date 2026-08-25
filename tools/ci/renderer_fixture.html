@@ -21,6 +21,19 @@
   negative coordinate, which a canvas accepts silently; `viewer_smoke.mjs
   --strict-text-bounds` hooks fillText and fails the run when a string never
   once lands inside.
+
+  WHAT THIS FIXTURE CANNOT DO
+  ---------------------------
+  The shipped renderer is `src/fruit_market/global.nim`: it draws every board
+  string into a SPRITE BITMAP with pixie and ships it over the sprite protocol,
+  so there is no `client/renderer.js` to load and no `fillText` on the shipped
+  path at all — which is why `canvas_text.total` is 0 against the real bundle.
+  This page therefore re-draws the worst case with the same layout, and it is
+  `tests/test_global.nim` that holds the SHIPPED arithmetic to account: it
+  builds a real `buildPacket` frame with a full offer bubble, a tag, a bar and
+  an alias plate on all eight seats at the board's extreme cells, decodes the
+  packet with the sprite protocol's own parser, and fails if any object leaves
+  the 1536 x 864 board. Read the two together.
 -->
 <style>
   html, body { margin: 0; background: #0b0704; color: #f2e8d8;

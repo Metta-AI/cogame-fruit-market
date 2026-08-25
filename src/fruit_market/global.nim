@@ -423,6 +423,16 @@ proc keepObject(state: var ViewerState, packet: var seq[uint8], objectId: int,
   packet.addObject(objectId, x, y, z, MapLayerId, spriteId)
   state.liveObjects[objectId] = true
 
+proc overlayX(cellX, spriteW: int): int =
+  ## An overlay is CENTRED over its cog's cell and then kept inside the board.
+  ## A canvas accepts a draw at a negative coordinate without complaint, so a
+  ## bubble over a cog in column 1 would simply be invisible from its left edge
+  ## in (cogchemists, 2026-08-24). tests/test_global.nim asserts the result.
+  clamp(cellX * CellPx + (CellPx - spriteW) div 2, 0, max(0, BoardW - spriteW))
+
+proc overlayY(top, spriteH: int): int =
+  clamp(top, 0, max(0, BoardH - spriteH))
+
 proc buildPacket*(state: var ViewerState, board: ReplayBoard,
     view: ChromeView, treeBare: openArray[int], chrome: string): seq[uint8] =
   ## One presentation frame: the board objects, then the chrome JSON smuggled
@@ -479,7 +489,7 @@ proc buildPacket*(state: var ViewerState, board: ReplayBoard,
     state.addSpriteOnce(result, BarSpriteBase + slot, bar,
       "bar" & $cog.hunger & "-" & $cog.stamina)
     state.keepObject(result, BarObjectBase + slot,
-      cog.x * CellPx + (CellPx - BarW) div 2, py - 10, OverlayZ,
+      overlayX(cog.x, BarW), overlayY(py - 10, BarH), OverlayZ,
       BarSpriteBase + slot)
     wanted[BarObjectBase + slot] = true
 
@@ -487,8 +497,9 @@ proc buildPacket*(state: var ViewerState, board: ReplayBoard,
     state.addSpriteOnce(result, AliasSpriteBase + slot, alias,
       "alias" & view.names[slot] & $view.farmTypes[slot])
     state.keepObject(result, AliasObjectBase + slot,
-      cog.x * CellPx + (CellPx - alias.width) div 2,
-      cog.y * CellPx + CellPx + 2, OverlayZ, AliasSpriteBase + slot)
+      overlayX(cog.x, alias.width),
+      overlayY(cog.y * CellPx + CellPx + 2, alias.height), OverlayZ,
+      AliasSpriteBase + slot)
     wanted[AliasObjectBase + slot] = true
 
     if cog.offerGive >= 0:
@@ -509,8 +520,9 @@ proc buildPacket*(state: var ViewerState, board: ReplayBoard,
         "bub" & $cog.offerGive & "-" & $cog.offerGiveN & "-" &
         $cog.offerWantN & "-" & $cog.offerUnfunded & "-" & $pulsing)
       state.keepObject(result, BubbleObjectBase + slot,
-        cog.x * CellPx + (CellPx - bubble.width) div 2,
-        max(0, py - 10 - BubbleH - 4), OverlayZ, BubbleSpriteBase + slot)
+        overlayX(cog.x, bubble.width),
+        overlayY(py - 10 - BubbleH - 4, bubble.height), OverlayZ,
+        BubbleSpriteBase + slot)
       wanted[BubbleObjectBase + slot] = true
 
     if (cog.flags and FlagStarving) != 0 or (cog.flags and FlagExhausted) != 0:
@@ -521,8 +533,9 @@ proc buildPacket*(state: var ViewerState, board: ReplayBoard,
         else: rgba(190, 54, 44, 235))
       state.addSpriteOnce(result, TagSpriteBase + slot, tag, "tag" & text)
       state.keepObject(result, TagObjectBase + slot,
-        cog.x * CellPx + (CellPx - tag.width) div 2,
-        max(0, py - 10 - TagH - BubbleH - 8), OverlayZ, TagSpriteBase + slot)
+        overlayX(cog.x, tag.width),
+        overlayY(py - 10 - TagH - BubbleH - 8, tag.height), OverlayZ,
+        TagSpriteBase + slot)
       wanted[TagObjectBase + slot] = true
 
   ## Retire anything that is no longer on the board, so a withdrawn offer's
