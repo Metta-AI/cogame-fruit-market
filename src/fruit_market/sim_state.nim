@@ -99,9 +99,13 @@ proc initSim*(config: GameConfig, policyNames: openArray[string] = []): Sim =
   let spawns = spawnCells(farmTypes)
   for slot in 0 ..< Seats:
     result.aliases[slot] = CogAliases[slot]
+    ## Platform-supplied, but it reaches results.names and the replay's
+    ## policyNames, so it goes through the same rune-safe truncation as every
+    ## other recorded string: a byte cut here puts invalid UTF-8 in a replay
+    ## and only a strict parser finds it (bullwhip, 2026-08-22).
     result.policyNames[slot] =
-      if slot < policyNames.len and policyNames[slot].len > 0:
-        policyNames[slot]
+      if slot < policyNames.len and policyNames[slot].strip().len > 0:
+        cleanText(policyNames[slot], MaxPolicyNameLen)
       else:
         CogAliases[slot]
     result.cogs[slot] = Cog(

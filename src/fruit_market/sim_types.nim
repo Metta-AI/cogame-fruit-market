@@ -81,7 +81,9 @@ const
   MaxSayLen* = 80
   MaxNotesLen* = 320
   MaxErrorLen* = 200
-    ## Every recorded string is truncated on RUNE boundaries at these caps.
+  MaxPolicyNameLen* = 64
+    ## Every recorded string is truncated on RUNE boundaries at these caps —
+    ## EVERY string that reaches the replay, policy names included.
 
   PlaybackSpeeds*: array[6, int] = [1, 2, 3, 4, 8, 16]
   TargetFps* = 24

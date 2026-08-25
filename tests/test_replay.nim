@@ -267,6 +267,35 @@ suite "rune-boundary truncation":
       check row["notes"].getStr().runeLen <= MaxNotesLen
     check checkedRows == Seats * 2
 
+  test "a policy name is cut on a rune boundary before it reaches the replay":
+    ## The platform supplies these, but they land in the replay's policyNames
+    ## and in results.names, and the note's rule is EVERY string that reaches
+    ## the replay.
+    var wide = ""
+    while wide.runeLen < MaxPolicyNameLen * 3:
+      wide.add("\u00e9\u4e2d\u00f8")
+    var names: seq[string]
+    for slot in 0 ..< Seats:
+      names.add(wide & "\n policy " & $slot)
+    var config = defaultGameConfig()
+    config.seed = 6
+    config.rounds = 1
+    var sim = initSim(config, names)
+    var orders: array[Seats, Order]
+    for slot in 0 ..< Seats:
+      orders[slot] = scriptedOrder(sim, slot, skHauler)
+    sim.setRoundOrders(orders)
+    sim.runRound()
+    let bytes = $replayJson(sim, sim.resultsJson())
+    check validateUtf8(bytes) == -1
+    let node = parseJson(bytes)
+    for slot in 0 ..< Seats:
+      let recorded = node["policyNames"][slot].getStr()
+      check validateUtf8(recorded) == -1
+      check recorded.runeLen <= MaxPolicyNameLen
+      check "\n" notin recorded
+      check node["results"]["names"][slot].getStr() == recorded
+
   test "LLM error text is capped at 200 runes, on a rune boundary":
     var long = ""
     while long.runeLen < 900:
