@@ -17,18 +17,6 @@ import
   std/[json, options, os, strutils, times],
   whisky
 
-const DefaultPrompt = """
-You are a market maker, not a farmer. Read every offer within sight first: if
-any cog wants the fruit you grow, post its EXACT mirror - the same two numbers,
-swapped - and stand within three cells of that cog until it executes. If nobody
-near you has posted anything, walk to the nearest stall and post the book
-price: three of your own fruit for two of theirs. Never post numbers you cannot
-cover; an unfunded offer wastes the whole round. Set eat to 'any' the moment
-hunger drops under 40 - a starving cog cannot walk to its counterparty. Note in
-your notes which alias posted which side, because a cog that offers bananas is
-a banana farmer and will be there again next round.
-"""
-
 const
   RegisterResendSeconds = 10.0
     ## An unappliable registration is HELD and RE-SENT rather than dropped
@@ -41,9 +29,12 @@ when isMainModule:
   if url.len == 0:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
-  let scripted = getEnv("PLAYER_SCRIPTED").strip()
+  var scripted = getEnv("PLAYER_SCRIPTED").strip()
   if prompt.len == 0 and scripted.len == 0:
-    prompt = DefaultPrompt
+    ## A seat that sets NEITHER is `PLAYER_SCRIPTED=hauler` (design note
+    ## "Decisions"): the scripted baseline, not an unconfigured LLM seat
+    ## quietly playing a stock prompt on the operator's credentials.
+    scripted = "hauler"
 
   proc promptFrame(): string =
     $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
