@@ -21,16 +21,41 @@ MANIFEST = Path(sys.argv[1] if len(sys.argv) > 1 else "coworld_manifest_template
 
 
 def load_with_coworld(path: Path) -> None:
-    from coworld import build as coworld_build  # type: ignore
+    """Run the CLI's OWN template loader and its OWN upload validator."""
+    from coworld import bundle as coworld_bundle  # type: ignore
+    from coworld.manifest import validate_upload_manifest  # type: ignore
 
-    loader = getattr(coworld_build, "_load_template_manifest", None)
+    loader = getattr(coworld_bundle, "_load_template_manifest", None)
     if loader is None:
         raise SystemExit(
             "the installed coworld package has no _load_template_manifest; "
             "pin the version this check was written against"
         )
-    manifest = loader(path)
+    document = json.loads(path.read_text())
+    placeholders = {
+        placeholder: f"{placeholder.strip('{}').lower()}:0.0.0"
+        for placeholder in _placeholders(document)
+    }
+    manifest = loader(document, "0.0.0", placeholders)
     print(f"coworld loaded {path}: {type(manifest).__name__}")
+    validated = validate_upload_manifest(
+        manifest.model_dump(mode="json", exclude_none=True)
+    )
+    print(f"coworld validated the upload document: {type(validated).__name__}")
+
+
+def _placeholders(node) -> set[str]:
+    """Every {{X_IMAGE}} the template references, whatever nests it."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for value in node.values():
+            found |= _placeholders(value)
+    elif isinstance(node, list):
+        for value in node:
+            found |= _placeholders(value)
+    elif isinstance(node, str) and node.startswith("{{") and node.endswith("}}"):
+        found.add(node)
+    return found
 
 
 def local_invariants(path: Path) -> None:

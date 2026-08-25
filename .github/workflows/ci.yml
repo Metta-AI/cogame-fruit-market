@@ -106,9 +106,14 @@ jobs:
         # rejected at phase 40 by the CLI's own loader. Run that loader here.
         run: |
           set -euo pipefail
-          pipx install "coworld[auth]==0.1.42" 2>/dev/null || \
-            pip install --user "coworld[auth]==0.1.42" || true
-          python3 tools/ci/check_manifest_loads.py coworld_manifest_template.json
+          # A venv, not pipx: pipx puts the package in its OWN environment, so
+          # `import coworld` from the runner's python still fails and the check
+          # would only ever run its local half.
+          python3 -m venv "${RUNNER_TEMP}/coworld-venv"
+          "${RUNNER_TEMP}/coworld-venv/bin/pip" install --quiet \
+            "coworld[auth]==0.1.42"
+          "${RUNNER_TEMP}/coworld-venv/bin/python" \
+            tools/ci/check_manifest_loads.py coworld_manifest_template.json
 
       - name: Run tests
         # Every tests/*.nim runs twice: debug (range/overflow checks, stack
