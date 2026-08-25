@@ -1,6 +1,8 @@
-# Build the static replay viewer with the same pinned Nim and Bitworld sources
-# as the native game. The output is architecture-neutral WebAssembly even
-# though this reproducible toolchain container runs as linux/amd64.
+# Build the static replay viewer with the same pinned nimby, Nim and Bitworld
+# sources as the native game (Dockerfile and .github/workflows/ci.yml both pin
+# nimby 0.1.26 / Nim 2.2.4 -- these three move together or not at all). The
+# output is architecture-neutral WebAssembly even though this reproducible
+# toolchain container runs as linux/amd64.
 FROM emscripten/emsdk:4.0.15 AS replay-viewer-builder
 
 RUN apt-get update && \
@@ -8,8 +10,8 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/* && \
   curl -fsSL \
     -o /usr/local/bin/nimby \
-    https://github.com/treeform/nimby/releases/download/0.1.27/nimby-Linux-X64 && \
-  echo "3b3084394bd26b09f84a3f82389f075221c8784893238390939d71dd66ac9e8b  /usr/local/bin/nimby" | sha256sum -c - && \
+    https://github.com/treeform/nimby/releases/download/0.1.26/nimby-Linux-X64 && \
+  echo "8e1e5c2769c657f599fb15dc4eef1bd861cdee898c6293d2a62df300c2f654c5  /usr/local/bin/nimby" | sha256sum -c - && \
   chmod +x /usr/local/bin/nimby && \
   nimby use 2.2.4
 
