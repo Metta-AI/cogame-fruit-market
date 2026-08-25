@@ -1,0 +1,8 @@
+services:
+  fruit_market:
+    image: coworld-fruit-market:latest
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fruit Market renderer fixture — worst-case board captions</title>
+<!--
+  WHY THIS EXISTS (cogchemists, 2026-08-24)
+  -----------------------------------------
+  tools/ci/docker_smoke.sh runs with NO ANTHROPIC_API_KEY, so every seat plays
+  the scripted baseline, and a scripted baseline emits no `say` and no unusual
+  offer: every replay CI produces carries zero LLM text and the widest offer
+  bubble it ever draws is the 3-for-2 book price. Nothing that plays that
+  replay can exercise the worst case.
+
+  So this fixture draws the WORST case directly, through the same anchor
+  arithmetic src/fruit_market/global.nim uses — the alias plate under the feet,
+  the hunger bar over the head, the offer bubble above the bar, the STARVING /
+  EXHAUSTED tag above that — with a full-cap 80-character `say`, a live offer on
+  EVERY seat, and cogs pinned at the top and bottom edges of the board, at
+  several canvas sizes. A caption anchored where there is no room lands at a
+  negative coordinate, which a canvas accepts silently; `viewer_smoke.mjs
+  --strict-text-bounds` hooks fillText and fails the run when a string never
+  once lands inside.
+-->
+<style>
+  html, body { margin: 0; background: #0b0704; color: #f2e8d8;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #wrap { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+  canvas { background: #17110b; display: block; }
+  #clock { font-size: 14px; letter-spacing: 0.1em; }
+  #statuschip { font-size: 12px; color: #e8a33d; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="clock">ROUND 4 / 12</div>
+  <div id="statuschip">renderer fixture</div>
+  <canvas id="board" width="1536" height="864"></canvas>
+  <canvas id="board-tiny" width="360" height="203"></canvas>
+  <canvas id="board-small" width="620" height="349"></canvas>
+  <canvas id="board-mid" width="960" height="540"></canvas>
+  <canvas id="board-wide" width="1280" height="720"></canvas>
+</div>
+<script>
+(function () {
+  'use strict';
+  // The caps the SERVER enforces (src/fruit_market/sim_types.nim). The fixture
+  // sizes its band from these, not from a guess.
+  var MAX_SAY = 80;
+  var MAX_ALIAS = 5;
+  var ALIASES = ['ASH', 'BRAM', 'CEDAR', 'DUNE', 'ELM', 'FERN', 'GALE', 'HOLT'];
+  var POLICIES = ['fruit-market-broker', 'fruit-market-ricardo',
+    'fruit-market-hauler', 'fruit-market-homesteader',
+    'fruit-market-hauler', 'fruit-market-hauler',
+    'fruit-market-homesteader', 'fruit-market-broker'];
+  var COLORS = ['#d94f3d', '#e2842c', '#e8c33a', '#8cc63f',
+                '#74bbe2', '#4a7ad6', '#e278b2', '#eeeae0'];
+  // A full-cap say line: exactly MAX_SAY characters, no shorter.
+  var SAY = ('mirroring ASH at the north stall - 3 apples for 2 bananas, ' +
+    'funded and holding').slice(0, MAX_SAY);
+  while (SAY.length < MAX_SAY) SAY += '.';
+
+  var failures = [];
+  function check(condition, message) {
+    if (!condition) failures.push(message);
+  }
+  check(SAY.length === MAX_SAY, 'the fixture say string is not at the cap');
+
+  // Worst case: every seat holds a live offer with the widest legal numbers,
+  // and the seats sit hard against the TOP and BOTTOM rows of the board, where
+  // an upward-growing bubble has the least room.
+  function seats(cols, rows) {
+    var out = [];
+    for (var i = 0; i < 8; i++) {
+      out.push({
+        slot: i,
+        alias: ALIASES[i],
+        policy: POLICIES[i],
+        col: 1 + i * Math.max(1, Math.floor((cols - 2) / 8)),
+        row: i % 2 === 0 ? 1 : rows - 2,
+        giveN: 6,
+        wantN: 4,
+        give: i % 2 === 0 ? '\uD83C\uDF4E' : '\uD83C\uDF4C',
+        want: i % 2 === 0 ? '\uD83C\uDF4C' : '\uD83C\uDF4E',
+        tag: i % 3 === 0 ? 'STARVING' : (i % 3 === 1 ? 'EXHAUSTED' : ''),
+        say: SAY
+      });
+    }
+    return out;
+  }
+
+  function plate(ctx, text, cx, top, fill, colour) {
+    ctx.font = fill + 'px ui-monospace, monospace';
+    var w = ctx.measureText(text).width + 10;
+    var h = fill + 8;
+    // A caption is anchored INSIDE the frame: reserve its own band rather than
+    // letting it grow off the top edge, which is exactly the bug this fixture
+    // exists to catch.
+    var y = Math.max(2, Math.min(top, ctx.canvas.height - h - 2));
+    var x = Math.max(2, Math.min(cx - w / 2, ctx.canvas.width - w - 2));
+    ctx.fillStyle = 'rgba(11,7,4,0.82)';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = colour;
+    ctx.fillText(text, x + 5, y + fill);
+    return { x: x, y: y, w: w, h: h };
+  }
+
+  function drawBoard(canvas) {
+    var ctx = canvas.getContext('2d');
+    var cols = 32, rows = 18;
+    var cw = canvas.width / cols, ch = canvas.height / rows;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#2f4a2b';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#3d6a9c';
+    ctx.fillRect(0, ch * 3, canvas.width, ch);
+    ctx.fillRect(0, ch * (rows - 4), canvas.width, ch);
+    var scale = Math.max(0.5, Math.min(1.6, canvas.width / 760));
+    var body = Math.round(11 * scale);
+    var bubbleFont = Math.round(13 * scale);
+
+    ctx.textBaseline = 'alphabetic';
+    seats(cols, rows).forEach(function (s) {
+      var cx = (s.col + 0.5) * cw;
+      var feet = (s.row + 1) * ch;
+      var head = s.row * ch;
+      ctx.fillStyle = COLORS[s.slot];
+      ctx.fillRect(cx - cw * 0.35, head + ch * 0.15, cw * 0.7, ch * 0.8);
+      // hunger + stamina bar over the head
+      ctx.fillStyle = '#58c26a';
+      ctx.fillRect(cx - cw * 0.4, Math.max(1, head - 6 * scale), cw * 0.8, 3 * scale);
+      // the offer bubble above the bar
+      plate(ctx, s.giveN + ' ' + s.give + ' \u2192 ' + s.wantN + ' ' + s.want,
+        cx, head - (10 + bubbleFont) * scale, bubbleFont, '#f6f0e2');
+      // the STARVING / EXHAUSTED tag above the bubble
+      if (s.tag) {
+        plate(ctx, s.tag, cx, head - (34 + bubbleFont) * scale, body, '#ffe6dc');
+      }
+      // the alias plate under the feet
+      plate(ctx, s.alias, cx, feet + 2, body, '#f2e8d8');
+      check(s.alias.length <= MAX_ALIAS + 1, 'alias longer than the cap: ' + s.alias);
+    });
+
+    // Four stall captions, in the middle band.
+    ['NORTH', 'EAST', 'SOUTH', 'WEST'].forEach(function (name, i) {
+      plate(ctx, name, canvas.width * (0.2 + i * 0.2), canvas.height * 0.5,
+        body, '#ffe9c9');
+    });
+
+    // The feed line: the full-cap say, drawn at the bottom-left of the board.
+    ctx.font = body + 'px ui-monospace, monospace';
+    var text = ALIASES[0] + ' \u201c' + SAY + '\u201d';
+    var wide = ctx.measureText(text).width;
+    // Shrink to fit rather than run off the edge — the same rule the DOM feed
+    // uses. At 360 px this is the string that would otherwise vanish.
+    var size = body;
+    while (wide > canvas.width - 8 && size > 5) {
+      size -= 1;
+      ctx.font = size + 'px ui-monospace, monospace';
+      wide = ctx.measureText(text).width;
+    }
+    ctx.fillStyle = 'rgba(11,7,4,0.82)';
+    ctx.fillRect(2, canvas.height - size - 8, wide + 6, size + 6);
+    ctx.fillStyle = '#f2e8d8';
+    ctx.fillText(text, 5, canvas.height - 8);
+    check(text.indexOf(SAY) >= 0, 'the feed line dropped the say string');
+  }
+
+  ['board', 'board-tiny', 'board-small', 'board-mid', 'board-wide']
+    .forEach(function (id) {
+      var canvas = document.getElementById(id);
+      if (canvas) drawBoard(canvas);
+    });
+
+  var status = document.getElementById('statuschip');
+  if (failures.length) {
+    status.textContent = 'FIXTURE FAILED: ' + failures.join('; ');
+    document.documentElement.setAttribute('data-replay-error', failures.join('; '));
+  } else {
+    status.textContent = 'renderer fixture OK (' + SAY.length + '-char say, ' +
+      '8 live offers, 5 canvas sizes)';
+    // The signal viewer_smoke.mjs waits for, set on the first drawn frame.
+    requestAnimationFrame(function () {
+      document.documentElement.setAttribute('data-replay-loaded', 'true');
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,792 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "fruit-market",
+    "trade",
+    "grid",
+    "llm-driven",
+    "melting-pot",
+    "eight-player"
+  ],
+  "episode_timeout_minutes": 20,
+  "game": {
+    "name": "fruit-market",
+    "description": "Apple farmers who crave bananas, banana farmers who crave apples, and offers that only clear when they mirror. Eight cogs, two concentric rivers, no words.",
+    "owner": "Softmax",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "runnable": {
+      "type": "game",
+      "image": "{{FRUIT_MARKET_IMAGE}}",
+      "run": [
+        "/bin/fruit-market"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/fruit-market/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-fruit-market/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count. Fruit Market is an eight-cog market: four apple farmers and four banana farmers, assigned by seed.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 8
+        },
+        "seed": {
+          "description": "Pins the farm-type shuffle. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "rivers": {
+          "description": "Concentric rivers. 2 is the authored board; 0 turns every river cell into land and leaves the tree lists unchanged.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 2
+        },
+        "rounds": {
+          "description": "Rounds in the episode. One round is one standing order per seat.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "default": 12
+        },
+        "ticksPerRound": {
+          "description": "Sim ticks the kernel walks each standing order for.",
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 120,
+          "default": 60
+        },
+        "moveCooldown": {
+          "description": "Ticks between moves onto land.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2
+        },
+        "waterMoveCooldown": {
+          "description": "Ticks between moves that enter water. Wading is slow.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "default": 4
+        },
+        "moveStaminaWater": {
+          "description": "Stamina charged for entering a river cell: the crossing toll.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40,
+          "default": 10
+        },
+        "moveStaminaLand": {
+          "description": "Stamina charged per land move.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4,
+          "default": 1
+        },
+        "harvestCooldownOwn": {
+          "description": "Ticks between harvests of the fruit you grow.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 12
+        },
+        "harvestCooldownOther": {
+          "description": "Ticks between harvests of the fruit you crave. The far grove is deliberately unproductive: this is what makes trade beat autarky.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240,
+          "default": 96
+        },
+        "yieldOwn": {
+          "description": "Fruit per harvest in your own grove.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 3
+        },
+        "yieldOther": {
+          "description": "Fruit per harvest in the far grove.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8,
+          "default": 1
+        },
+        "regrowTicks": {
+          "description": "Ticks a harvested tree stays bare.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240,
+          "default": 60
+        },
+        "invCap": {
+          "description": "Inventory cap, per fruit.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 12
+        },
+        "hunger0": {
+          "description": "Starting hunger, out of 100.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 60
+        },
+        "hungerDrainPeriod": {
+          "description": "Ticks per point of hunger lost.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 4
+        },
+        "craveNutrition": {
+          "description": "Hunger restored by eating the fruit you crave.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 25
+        },
+        "ownNutrition": {
+          "description": "Hunger restored by eating the fruit you grow.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 10
+        },
+        "craveScore": {
+          "description": "Points per craved fruit eaten.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 5
+        },
+        "ownScore": {
+          "description": "Points per own fruit eaten.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 1
+        },
+        "eatCooldown": {
+          "description": "Ticks between meals. Two fruit a round is the whole budget, so what you eat is the whole game.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 24
+        },
+        "starveDrain": {
+          "description": "Stamina lost per tick at hunger 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "default": 2
+        },
+        "staminaRegenPeriod": {
+          "description": "Ticks per point of stamina regained while hunger is above 0.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 2
+        },
+        "tradeRadius": {
+          "description": "Chebyshev distance, cog to cog, for two mirroring offers to clear.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "default": 3
+        },
+        "viewRadius": {
+          "description": "Chebyshev distance a seat observes.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 6
+        },
+        "offerMax": {
+          "description": "Largest legal quantity on either side of an offer.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "default": 6
+        },
+        "llmTimeoutSeconds": {
+          "description": "Whole-second deadline for one batch of eight parallel requests.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 60,
+          "default": 20
+        },
+        "minTurnSeconds": {
+          "description": "Wall-clock floor between BATCH STARTS, which is what keeps the episode under the Bedrock sidecar's 30 requests-per-minute ceiling.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60,
+          "default": 18
+        },
+        "maxOutputTokens": {
+          "description": "Model output budget. Below ~1000 a truncated reply shows up as the misleading 'unbalanced JSON object' signature.",
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 2000,
+          "default": 1000
+        },
+        "model": {
+          "description": "Direct-Anthropic model id. The Bedrock transport picks from its own haiku-only ladder instead.",
+          "type": "string"
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall clock the game assumes the platform allows when COWORLD_TIMEOUT_SECONDS is absent; play stops between rounds at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "playerConnectTimeoutSeconds": {
+          "description": "Seconds to wait for the seats. The lobby returns as soon as every connected socket has registered.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "default": 180
+        },
+        "shutdownGraceSeconds": {
+          "description": "Seconds /healthz and /global keep answering after the artifacts are written; hosted certification pings the global websocket after the player pods start.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120,
+          "default": 20
+        },
+        "showPlayerLabels": {
+          "description": "Draw the alias plate under every cog.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "win",
+        "rounds",
+        "reason",
+        "ending"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy names, by slot. Spectator side only; a seat never sees them.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          }
+        },
+        "aliases": {
+          "description": "In-game cog aliases, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          }
+        },
+        "farm_types": {
+          "description": "apple or banana, by slot, assigned by seed.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "enum": [
+              "apple",
+              "banana"
+            ]
+          }
+        },
+        "scores": {
+          "description": "5 x craved_eaten + own_eaten, by slot. Higher is better.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "win": {
+          "description": "True for every slot whose score equals the maximum; ties mark several winners.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "craved_eaten": {
+          "description": "Craved fruit eaten, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "own_eaten": {
+          "description": "Own fruit eaten, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "harvested": {
+          "description": "Fruit picked, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "trades": {
+          "description": "Executed trades, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "volume": {
+          "description": "Fruit units given away, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "crossings": {
+          "description": "Water cells entered, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "starving_ticks": {
+          "description": "Ticks at hunger 0, by slot.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "mean_rate_x100": {
+          "description": "Volume-weighted mean apples-per-banana over every executed trade, x100. 0 if nothing traded.",
+          "type": "integer"
+        },
+        "total_trades": {
+          "description": "Executed trades on the whole board.",
+          "type": "integer"
+        },
+        "rounds": {
+          "description": "Rounds completed.",
+          "type": "integer"
+        },
+        "reason": {
+          "description": "complete, deadline or forfeit.",
+          "type": "string",
+          "enum": [
+            "complete",
+            "deadline",
+            "forfeit"
+          ]
+        },
+        "ending": {
+          "description": "round_limit, famine, deadline or forfeit.",
+          "type": "string",
+          "enum": [
+            "round_limit",
+            "famine",
+            "deadline",
+            "forfeit"
+          ]
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "fruit-market.player.v1, JSON text frames.\n\ngame -> player, on connect: {\"type\":\"welcome\",\"protocol\":\"fruit-market.player.v1\",\"slot\":N,\"name\":\"Dune\",\"rounds\":12,\"ticksPerRound\":60,\"variant\":\"concentric-rivers\"}.\n\ngame -> player, at every round boundary and at episode end: the {\"type\":\"state\"} observation -- slot, name, round, rounds, tick, board, you{cell, zone, farmType, craves, apples, bananas, hunger, stamina, score, exhausted, tradesThisEpisode, offer, lastOrder}, view{radius, map (13 lines), legend, cogs[] with each visible cog's alias, cell, dist, offer and mirrorsYou, ripeTrees[]}, stalls[] with walking distances, tape[] (the last eight executed trades, applesPerBanana x100), history[] (your own rounds), notes, and the full rule/constant block for this variant.\n\ngame -> player, terminal: {\"type\":\"final\",\"done\":true,\"slot\":N,\"scores\":[...8...],\"names\":[...aliases...],\"rounds\":R,\"reason\":...,\"ending\":...}. The player exits 0.\n\nplayer -> game: {\"type\":\"prompt\",\"prompt\":\"<= 4000 chars\",\"scripted\":\"hauler|homesteader|\"} sent immediately on connect, again after welcome, and re-sent every 2 s for up to 10 s until the registration is applied. Any other frame is ignored with a log line.\n\nTHE REPLY the game asks the model for is the standing order above. `say` is SPECTATOR-ONLY: it is drawn in the viewer feed and recorded in the replay and is never delivered to another seat. The offer IS the message."
+      },
+      "global": {
+        "type": "text",
+        "value": "WS /global carries the bitworld sprite protocol: layer + viewport definitions, snappy-compressed RGBA sprite definitions and per-frame object placements for the 1536 x 864 board, plus the broadcast chrome smuggled as the LABEL of the reserved 1x1 sprite id 4090. The chrome frame is one JSON object per presentation frame: t, mt, ph, pl, sp, mx, st, lp, en, bs, teams{apple,banana}, roster[8] (alias in `name`, POLICY name in `pol`), events[], and -- once, on the first frame -- lead (the exchange-rate series), beats (round, firsttrade, starve, famine, gameover) and over (the verdict). GET /client/global serves that page.\n\nReplays are a STATIC FILE plus a browser wasm viewer, never a pod: index.html?replay=<s3 url> out of the static-replay-viewer bundle decodes the recorded state frames in the browser and contacts no server but S3."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Fruit Market is a wordless eight-cog market. Four cogs farm apples, four farm bananas, and the assignment is dealt from the episode seed. You score FIVE points for eating a fruit you do not grow and one for eating your own, so everybody wants what everybody else has. The board is four concentric belts: the apple grove on the outside, then a river, then the market ring with four named stalls (NORTH, EAST, SOUTH, WEST), then another river, then the banana island. Your own grove pays three fruit a harvest; the far grove pays one, at a fifth of the rate, for ten stamina of river tolls each way -- so walking across to pick the fruit you crave is a bad trade and a real option.\n\nThe only way to get the fruit you crave cheaply is a POSTED OFFER, and an offer clears only against its EXACT MIRROR: their give must be your want, with the same two numbers, swapped, held by a cog within three cells. Not a better price. Not a bigger size. One trade per cog per round, and an executed offer is consumed. Nobody can talk: the offer is the message and the four stalls are the only meeting protocol there is. That is comparative advantage, bargaining and price discovery with no words -- and a hunger bar over every cog that says what a failed trade costs."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "Rules",
+          "content": {
+            "type": "text",
+            "value": "THE BOARD. A fixed 32 x 18 walled grid. For every interior cell let d = min(x-1, 30-x, y-1, 16-y), so d runs 0..7. d in {0,1} is the APPLE GROVE (24 apple trees), d == 2 is the OUTER RIVER, d in {3,4} is the MARKET RING (four stalls, no trees), d == 5 is the INNER RIVER, d in {6,7} is the BANANA ISLAND (24 banana trees). Tree cells are impassable; you harvest from an orthogonally adjacent cell. Each grove is ONE river from the market ring and TWO from the other grove.\n\nTHE TICK, in this exact order, nine steps, seats resolving in ascending slot order within a step: (1) every bare tree's regrow counter drops by one; (2) each cog's kernel derives this tick's grid action from its standing order; (3) harvest -- the first ripe adjacent tree in N, E, S, W order, three of your own fruit or one of the other, anything over the inventory cap spills; (4) move, against the live board, charging the water toll and refusing a move you cannot pay for; (5) the offer book updates -- on a round boundary the new orders land, and every live offer's `unfunded` flag is recomputed from current inventories; (6) matching; (7) eat; (8) hunger and stamina; (9) record the frame.\n\nMATCHING. Build every unordered pair whose two offers mirror EXACTLY, both funded, within tradeRadius, neither side overflowing its cap on receipt. Sort by total volume DESCENDING, then Chebyshev distance ASCENDING, then lower slot ascending, then higher slot ascending -- a total order, so the tie-break is complete. Sweep in that order and execute a pair only if neither cog has traded this tick and neither has traded this round.\n\nHUNGER AND STAMINA. Hunger starts at 60 of 100 and drops one every four ticks. At zero you lose two stamina a tick and regain none; at zero stamina you are exhausted and both move and harvest degrade to wait -- but you can still eat and still trade, so a stranded cog can be rescued by a counterparty who walks to it. Eating the fruit you crave restores 25 hunger and scores 5; your own restores 10 and scores 1; you eat at most one fruit every 24 ticks.\n\nSCORING AND ENDINGS. Seat score = 5 x craved eaten + 1 x own eaten, higher is better, ties mark several winners. The episode ends at the first of: twelve rounds played (complete / round_limit); every seat at hunger 0 AND stamina 0 at a round boundary (complete / famine -- a market that starves itself is a completed game); the wall clock passing 60% of the episode timeout (deadline); or nobody connecting inside the connect grace (forfeit)."
+          }
+        },
+        {
+          "id": "policies.md",
+          "title": "Fielding a policy",
+          "content": {
+            "type": "text",
+            "value": "A POLICY IS A PROMPT. The player process connects, sends one {\"type\":\"prompt\",\"prompt\":...,\"scripted\":...} frame and then only listens; every decision is made inside the GAME container, which issues all eight seats' requests as ONE parallel batch per round. Set PLAYER_PROMPT to field a strategy in words, or PLAYER_SCRIPTED=hauler | homesteader to field one of the two built-in baselines. A seat that sets neither plays hauler.\n\nTHE STANDING ORDER. Once per round you answer with exactly one JSON object:\n  job    harvest | market | trek | rest  (required)\n  fruit  apple | banana                  (optional; harvest and trek)\n  stall  north | east | south | west     (optional; market)\n  eat    crave | any | none              (absent means any)\n  offer  {\"give\":{\"fruit\",\"n\"},\"want\":{\"fruit\",\"n\"}} or null -- absent leaves your standing offer alone, null withdraws it, n outside 1..6 is clamped and flagged, and give.fruit must differ from want.fruit\n  say    at most 80 characters, SPECTATOR ONLY -- no other seat ever reads it\n  notes  at most 320 characters, private, handed back to you next round\n\nA kernel walks the job for the next 60 ticks: harvest walks to the nearest ripe tree of a fruit and picks it, market walks to a named stall and stands there so the offer can clear, trek crosses to the far grove, rest stands still. Every reply is parsed tolerantly; an invalid one is retried once with a hint and then falls back to the hauler order, recorded on the `order` event as source: fallback.\n\nWHAT YOU SEE. Your own cell, zone, farm type, both inventories, hunger, stamina, score, your standing offer and last order; a 13 x 13 ASCII map centred on you; every cog within six cells with its posted offer and a precomputed mirrorsYou flag; the ripe trees in view; the four stalls with your walking distance to each; the global tape of the last eight executed trades; your own per-round history; and your notes. You never see another cog's farm type, inventory, hunger, score or notes."
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "fruit-market-player",
+      "name": "Fruit Market Prompt Player",
+      "type": "player",
+      "description": "The reference Fruit Market policy: delivers its PLAYER_PROMPT to the game and spectates until the final frame. Every decision is made in the game container, which asks the model for all eight seats' standing orders as one parallel batch per round. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{FRUIT_MARKET_IMAGE}}",
+      "run": [
+        "/bin/fruit-market-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-fruit-market/tree/main"
+    },
+    {
+      "id": "fruit-market-hauler",
+      "name": "Fruit Market Hauler Baseline",
+      "type": "player",
+      "description": "The scripted market maker: bank three of your own fruit, walk to the round's rendezvous stall and post the book price -- three of your own fruit for two of theirs, which is the exact mirror of what the other guild posts. Deterministic, no LLM.",
+      "image": "{{FRUIT_MARKET_IMAGE}}",
+      "run": [
+        "/bin/fruit-market-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "hauler"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-fruit-market/tree/main"
+    },
+    {
+      "id": "fruit-market-homesteader",
+      "name": "Fruit Market Homesteader Baseline",
+      "type": "player",
+      "description": "The scripted autarky foil: never posts an offer, harvests its own grove and treks across both rivers to pick the fruit it craves itself. The reason the rivers exist. Deterministic, no LLM.",
+      "image": "{{FRUIT_MARKET_IMAGE}}",
+      "run": [
+        "/bin/fruit-market-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "homesteader"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-fruit-market/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "open-market",
+      "name": "Open market (no rivers)",
+      "description": "The idea's first source substrate: the same board with no rivers at all. Every river cell is land and crossing is free, so geography stops being part of the bargain and the market is purely about who copies whose numbers.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Ash"
+          },
+          {
+            "name": "Bram"
+          },
+          {
+            "name": "Cedar"
+          },
+          {
+            "name": "Dune"
+          },
+          {
+            "name": "Elm"
+          },
+          {
+            "name": "Fern"
+          },
+          {
+            "name": "Gale"
+          },
+          {
+            "name": "Holt"
+          }
+        ],
+        "num_agents": 8,
+        "rounds": 12,
+        "ticksPerRound": 60,
+        "playerConnectTimeoutSeconds": 180,
+        "rivers": 0,
+        "moveStaminaWater": 0,
+        "regrowTicks": 60
+      }
+    },
+    {
+      "id": "concentric-rivers",
+      "name": "Concentric rivers",
+      "description": "The league default and the idea's second source substrate. Two one-cell rivers separate the apple grove, the market ring and the banana island: meeting a counterparty costs one crossing each, self-supplying costs two each way.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Ash"
+          },
+          {
+            "name": "Bram"
+          },
+          {
+            "name": "Cedar"
+          },
+          {
+            "name": "Dune"
+          },
+          {
+            "name": "Elm"
+          },
+          {
+            "name": "Fern"
+          },
+          {
+            "name": "Gale"
+          },
+          {
+            "name": "Holt"
+          }
+        ],
+        "num_agents": 8,
+        "rounds": 12,
+        "ticksPerRound": 60,
+        "playerConnectTimeoutSeconds": 180,
+        "rivers": 2,
+        "moveStaminaWater": 10,
+        "regrowTicks": 60
+      }
+    },
+    {
+      "id": "deep-rivers",
+      "name": "Deep concentric rivers",
+      "description": "The same board with the crossing toll raised from 10 stamina to 32. Geography bites: a cog that spends the episode walking between groves runs out of stamina before it runs out of rounds, and the recluse loses more of its score to the rivers than the trader does.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Ash"
+          },
+          {
+            "name": "Bram"
+          },
+          {
+            "name": "Cedar"
+          },
+          {
+            "name": "Dune"
+          },
+          {
+            "name": "Elm"
+          },
+          {
+            "name": "Fern"
+          },
+          {
+            "name": "Gale"
+          },
+          {
+            "name": "Holt"
+          }
+        ],
+        "num_agents": 8,
+        "rounds": 12,
+        "ticksPerRound": 60,
+        "playerConnectTimeoutSeconds": 180,
+        "rivers": 2,
+        "moveStaminaWater": 32,
+        "regrowTicks": 60
+      }
+    },
+    {
+      "id": "lean-harvest",
+      "name": "Lean harvest",
+      "description": "The same board with trees regrowing in 90 ticks instead of 60. Fruit is scarcer, so a posted offer is worth more and hoarding for a trade that never clears hurts more.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Ash"
+          },
+          {
+            "name": "Bram"
+          },
+          {
+            "name": "Cedar"
+          },
+          {
+            "name": "Dune"
+          },
+          {
+            "name": "Elm"
+          },
+          {
+            "name": "Fern"
+          },
+          {
+            "name": "Gale"
+          },
+          {
+            "name": "Holt"
+          }
+        ],
+        "num_agents": 8,
+        "rounds": 12,
+        "ticksPerRound": 60,
+        "playerConnectTimeoutSeconds": 180,
+        "rivers": 2,
+        "moveStaminaWater": 10,
+        "regrowTicks": 90
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Ash"
+        },
+        {
+          "name": "Bram"
+        },
+        {
+          "name": "Cedar"
+        },
+        {
+          "name": "Dune"
+        },
+        {
+          "name": "Elm"
+        },
+        {
+          "name": "Fern"
+        },
+        {
+          "name": "Gale"
+        },
+        {
+          "name": "Holt"
+        }
+      ],
+      "num_agents": 8,
+      "seed": 7,
+      "rivers": 2,
+      "rounds": 6,
+      "ticksPerRound": 60,
+      "minTurnSeconds": 0,
+      "playerConnectTimeoutSeconds": 180
+    },
+    "players": [
+      {
+        "player_id": "fruit-market-player"
+      },
+      {
+        "player_id": "fruit-market-hauler"
+      },
+      {
+        "player_id": "fruit-market-hauler"
+      },
+      {
+        "player_id": "fruit-market-player"
+      },
+      {
+        "player_id": "fruit-market-hauler"
+      },
+      {
+        "player_id": "fruit-market-homesteader"
+      },
+      {
+        "player_id": "fruit-market-hauler"
+      },
+      {
+        "player_id": "fruit-market-homesteader"
+      }
+    ]
+  }
+}

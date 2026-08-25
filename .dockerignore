@@ -1,0 +1,11 @@
+.git
+.DS_Store
+nim.cfg
+nimcache
+out
+tmp
+dist
+build
+.scratch
+replay-viewer/dist
+*.tmp

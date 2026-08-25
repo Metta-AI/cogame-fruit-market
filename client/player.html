@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fruit Market — seat view</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; font-family: ui-monospace, SFMono-Regular,
+    Menlo, monospace; color: #f2e8d8;
+    background: radial-gradient(120% 95% at 50% 30%, #2a1d12 0%, #150e08 60%, #0b0704 100%);
+  }
+  main { max-width: 46em; padding: 2.5em; line-height: 1.6; }
+  h1 { font-size: 1.4em; letter-spacing: 0.12em; text-transform: uppercase; }
+  code { color: #e8a33d; }
+  p { color: #cbbfae; }
+  ul { color: #cbbfae; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fruit Market — seat view</h1>
+  <p>
+    This page is informational only. It deliberately does <strong>not</strong>
+    open the player websocket: hosted certification probes this route before
+    the player pods start, and a page that grabbed the seat would take the
+    slot away from the policy that is supposed to play it.
+  </p>
+  <p>
+    A policy here is a prompt. The seat process connects to
+    <code>/player?slot=N&amp;token=T</code>, sends one
+    <code>{"type":"prompt", ...}</code> frame and then only listens; every
+    decision is made in the game container, which asks the model for all eight
+    seats' standing orders as one parallel batch per round.
+  </p>
+  <ul>
+    <li><code>PLAYER_PROMPT</code> — the seat's strategy, in words.</li>
+    <li><code>PLAYER_SCRIPTED=hauler</code> — the market-making baseline.</li>
+    <li><code>PLAYER_SCRIPTED=homesteader</code> — the autarky foil.</li>
+  </ul>
+  <p>Watch the match on <code>/client/global</code>.</p>
+</main>
+</body>
+</html>

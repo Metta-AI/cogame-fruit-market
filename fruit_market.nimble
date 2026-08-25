@@ -1,0 +1,16 @@
+version     = "0.1.0"
+author      = "Softmax"
+description = "Fruit Market — eight cogs, two fruits, two rivers, and offers that only clear when they mirror."
+license     = "MIT"
+
+srcDir = "src"
+
+requires "nim >= 2.2.4"
+requires "bitworld >= 0.1.0"
+requires "pixie"
+requires "mummy >= 0.4.7"
+requires "curly >= 1.1.1"
+requires "whisky >= 0.1.3"
+requires "supersnappy >= 2.1.3"
+requires "jsony"
+requires "flatty >= 0.3.4"
