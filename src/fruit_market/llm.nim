@@ -496,6 +496,21 @@ proc requestFor(client: LlmClient, system, user: string):
   result.headers = headers
   result.body = $body
 
+proc textOfBody*(body: string): string =
+  ## The text of a 2xx reply. A refusal and a `max_tokens` stop before any `{`
+  ## both raise BY NAME — the max_tokens signature otherwise shows up as the
+  ## misleading "unbalanced JSON object" (hanabi, 2026-08-24).
+  let payload = parseJson(body)
+  if payload{"stop_reason"}.getStr() == "refusal":
+    raise newException(FruitMarketError, "llm refusal")
+  for contentBlock in payload{"content"}:
+    if contentBlock{"type"}.getStr() == "text":
+      result.add(contentBlock{"text"}.getStr())
+  if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
+    raise newException(FruitMarketError,
+      "reply cut off at max_tokens mid-JSON: " &
+      result[0 .. min(result.high, 160)].replace("\n", " "))
+
 proc textOf(client: LlmClient, response: Response, error, url: string): string =
   if error.len > 0:
     raise newException(FruitMarketError, "llm transport: " & error)
@@ -509,16 +524,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string): string =
   if response.code < 200 or response.code >= 300:
     raise newException(FruitMarketError, "llm error " & $response.code & ": " &
       response.body[0 .. min(response.body.high, 200)])
-  let payload = parseJson(response.body)
-  if payload{"stop_reason"}.getStr() == "refusal":
-    raise newException(FruitMarketError, "llm refusal")
-  for contentBlock in payload{"content"}:
-    if contentBlock{"type"}.getStr() == "text":
-      result.add(contentBlock{"text"}.getStr())
-  if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
-    raise newException(FruitMarketError,
-      "reply cut off at max_tokens mid-JSON: " &
-      result[0 .. min(result.high, 160)].replace("\n", " "))
+  textOfBody(response.body)
 
 # ---- the reply schema --------------------------------------------------------
 
@@ -625,6 +631,24 @@ proc parseOrder*(payload: JsonNode, sim: Sim, slot: int): Order =
         wantFruit: wantFruit, wantN: wantN.value)
       result.clamped = giveN.clamped or wantN.clamped
 
+proc buildBatch*(
+  client: LlmClient,
+  sim: Sim,
+  prompts: array[Seats, string],
+  open: seq[int],
+  attempt: int
+): RequestBatch =
+  ## ONE request per open seat, in ONE batch. Decisions inside a round are
+  ## simultaneous by rule, so `decideAll` issues this whole batch in parallel;
+  ## a sequential sweep would blow the play budget. tests/test_llm.nim asserts
+  ## `buildBatch(...).len == openSeats`.
+  for slot in open:
+    var user = sim.userPrompt(slot, prompts[slot])
+    if attempt > 0:
+      user.add(RetryHint)
+    let request = client.requestFor(sim.systemPrompt(slot), user)
+    result.post(request.url, request.headers, request.body, $slot)
+
 proc decideAll*(
   client: LlmClient,
   sim: Sim,
@@ -647,13 +671,7 @@ proc decideAll*(
     if open.len == 0 or client.disabled:
       break
     let started = epochTime()
-    var batch: RequestBatch
-    for slot in open:
-      var user = sim.userPrompt(slot, prompts[slot])
-      if attempt > 0:
-        user.add(RetryHint)
-      let request = client.requestFor(sim.systemPrompt(slot), user)
-      batch.post(request.url, request.headers, request.body, $slot)
+    var batch = client.buildBatch(sim, prompts, open, attempt)
     ## ONE parallel batch for the whole round — this is a simultaneous-decision
     ## game and a sequential sweep would blow the play budget.
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)

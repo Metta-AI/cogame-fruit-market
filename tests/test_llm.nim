@@ -1,12 +1,100 @@
 ## tests/test_llm.nim — the decision layer.
 ##
-## No network: the transport is exercised through `decideAll` with the client
-## disabled (which is exactly the hosted no-credentials path) and through the
-## parser and extractor directly.
+## No outbound network: the transport is exercised through `decideAll` against
+## a STUB HTTP server on 127.0.0.1 that times out, 429s, 403s or answers junk,
+## through the client disabled (the hosted no-credentials path), and through
+## the parser, the batch builder and the extractor directly.
 
-import std/[json, strutils, unittest]
+import std/[json, net, os, strutils, times, unittest]
+
+import curly
 
 import fruit_market/sim, fruit_market/scripted, fruit_market/llm
+
+type StubMode = enum
+  smJunk        ## 200 with prose and no JSON object
+  smThrottle    ## 429
+  smForbidden   ## 403
+  smSilent      ## answers so late the client's own deadline fires first
+
+var
+  stubMode: StubMode
+  stubPort: int
+  stubListener: Socket
+  stubThread: Thread[void]
+
+proc stubAccept() =
+  let listener = stubListener
+  while true:
+    var client: Socket
+    try:
+      listener.accept(client)
+    except CatchableError:
+      continue
+    try:
+      ## Drain the request head; the body is irrelevant to a stub.
+      while true:
+        let line = client.recvLine(timeout = 2000)
+        if line.len == 0 or line == "\r\n":
+          break
+      let body =
+        case stubMode
+        of smJunk: """I think I will go to the market, but I will not say so in JSON."""
+        of smThrottle: """{"type":"error","error":{"type":"overloaded"}}"""
+        of smForbidden: """{"type":"error","error":{"type":"forbidden"}}"""
+        of smSilent: """{"content":[{"type":"text","text":"{}"}]}"""
+      let status =
+        case stubMode
+        of smThrottle: "429 Too Many Requests"
+        of smForbidden: "403 Forbidden"
+        else: "200 OK"
+      if stubMode == smSilent:
+        ## Outlast llmTimeoutSeconds so the client's own deadline fires.
+        sleep(2500)
+      client.send("HTTP/1.1 " & status & "\r\nContent-Type: application/json" &
+        "\r\nContent-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" &
+        body)
+    except CatchableError:
+      discard
+    try:
+      client.close()
+    except CatchableError:
+      discard
+
+proc stubServe() {.thread.} =
+  ## A deliberately dumb HTTP/1.1 server: read the request, answer once, close.
+  ## It is bound to 127.0.0.1 and is the only endpoint this test can reach.
+  {.gcsafe.}:
+    stubAccept()
+
+proc startStub(mode: StubMode) =
+  ## Points the Bedrock branch of `newLlmClient` at the stub. One server for the
+  ## whole file; the mode is switched between tests.
+  if stubPort == 0:
+    ## Bind here, in the test thread, so a busy port is a retry rather than a
+    ## dead server thread and a mystery connection refused.
+    stubListener = newSocket()
+    stubListener.setSockOpt(OptReuseAddr, true)
+    for candidate in 45180 .. 45260:
+      try:
+        stubListener.bindAddr(Port(candidate), "127.0.0.1")
+        stubPort = candidate
+        break
+      except CatchableError:
+        discard
+    doAssert stubPort != 0, "no free loopback port for the stub transport"
+    stubListener.listen()
+    stubMode = mode
+    createThread(stubThread, stubServe)
+    sleep(100)
+  stubMode = mode
+  putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://127.0.0.1:" & $stubPort)
+  putEnv("AWS_BEARER_TOKEN_BEDROCK", "stub-token")
+
+proc stubClient(timeoutSeconds = 1): LlmClient =
+  var config = defaultGameConfig()
+  config.llmTimeoutSeconds = timeoutSeconds
+  newLlmClient(config)
 
 proc bench(seed = 2): Sim =
   var config = defaultGameConfig()
@@ -152,22 +240,117 @@ suite "degrade, never hang":
       let want = if slot < 4: skHauler else: skHomesteader
       check orders[slot] == scriptedOrder(game, slot, want)
 
-suite "the batch and the pacing floor":
-  test "one batch carries every open seat":
-    ## `decideAll` opens exactly the seats that are connected, unregistered as
-    ## scripted, and playable — eight on round one — and issues them as ONE
-    ## parallel batch. Counting them here is what keeps a future refactor from
-    ## quietly going sequential.
+suite "a stubbed transport degrades to the scripted order":
+  ## Every one of these routes a REAL request through curly to the stub and
+  ## asserts the seat still gets a legal hauler order marked `fallback` — the
+  ## record phase 60 counts. Nothing raises out of `decideAll`, ever.
+  proc runAgainstStub(mode: StubMode, openSeats = Seats,
+      timeoutSeconds = 1): array[Seats, Order] =
+    startStub(mode)
+    let client = stubClient(timeoutSeconds)
+    check not client.disabled          ## the stub IS a credentialed transport
     var game = bench()
+    var prompts: array[Seats, string]
     var scripts: array[Seats, ScriptKind]
     var connected: array[Seats, bool]
-    var open = 0
+    for slot in 0 ..< Seats:
+      prompts[slot] = "trade well"
+      scripts[slot] = if slot < openSeats: skNone else: skHauler
+      connected[slot] = true
+    client.decideAll(game, prompts, scripts, connected)
+
+  test "junk with no JSON object falls back and is recorded as fallback":
+    let game = bench()
+    let orders = runAgainstStub(smJunk)
+    for slot in 0 ..< Seats:
+      check orders[slot].source == osFallback
+      check orders[slot].job in {jHarvest, jMarket, jTrek, jRest}
+      var want = scriptedOrder(game, slot, skHauler)
+      want.source = osFallback
+      check orders[slot] == want
+
+  test "a 429 falls back and leaves the client enabled for the next round":
+    startStub(smThrottle)
+    let client = stubClient()
+    var game = bench()
+    var prompts: array[Seats, string]
+    var scripts: array[Seats, ScriptKind]
+    var connected: array[Seats, bool]
     for slot in 0 ..< Seats:
       scripts[slot] = skNone
       connected[slot] = true
-      if scripts[slot] == skNone and connected[slot]:
-        open.inc
-    check open == Seats
+    let orders = client.decideAll(game, prompts, scripts, connected)
+    for slot in 0 ..< Seats:
+      check orders[slot].source == osFallback
+    ## 429 is a throttle, not an auth failure: the seat is retried next round.
+    check not client.disabled
+
+  test "a 403 falls back and disables the client for the rest of the episode":
+    startStub(smForbidden)
+    let client = stubClient()
+    var game = bench()
+    var prompts: array[Seats, string]
+    var scripts: array[Seats, ScriptKind]
+    var connected: array[Seats, bool]
+    for slot in 0 ..< Seats:
+      scripts[slot] = skNone
+      connected[slot] = true
+    let orders = client.decideAll(game, prompts, scripts, connected)
+    for slot in 0 ..< Seats:
+      check orders[slot].source == osFallback
+    check client.disabled
+
+  test "a transport that outlasts llmTimeoutSeconds falls back, bounded":
+    ## One open seat, so the wall clock is two attempts of the 1 s deadline.
+    let started = epochTime()
+    let orders = runAgainstStub(smSilent, openSeats = 1)
+    let elapsed = epochTime() - started
+    check orders[0].source == osFallback
+    check orders[1].source == osScripted
+    check elapsed < 20.0
+
+suite "the batch and the pacing floor":
+  test "one batch carries every open seat":
+    ## `decideAll` opens exactly the seats that are connected and not
+    ## registered as scripted — eight on round one — and issues them as ONE
+    ## parallel batch. Asserting on the RequestBatch itself is what keeps a
+    ## future refactor from quietly going sequential.
+    var game = bench()
+    var prompts: array[Seats, string]
+    var open: seq[int]
+    for slot in 0 ..< Seats:
+      prompts[slot] = "trade well"
+      open.add(slot)
+    startStub(smJunk)
+    let client = stubClient()
+    let batch = client.buildBatch(game, prompts, open, 0)
+    check batch.len == open.len
+    check batch.len == Seats
+    var tags: seq[string]
+    for i in 0 ..< batch.len:
+      tags.add(batch[i].tag)
+      check batch[i].verb == "POST"
+    for slot in 0 ..< Seats:
+      check $slot in tags
+    ## The retry batch carries the hint, and only the seats still open.
+    let retry = client.buildBatch(game, prompts, @[3], 1)
+    check retry.len == 1
+    check "previous reply was invalid" in retry[0].body
+
+  test "a max_tokens stop raises the named error, not 'unbalanced JSON'":
+    expect FruitMarketError:
+      discard textOfBody("""{"stop_reason":"max_tokens","content":[
+        {"type":"text","text":"Let me think about which stall to walk to"}]}""")
+    var named = ""
+    try:
+      discard textOfBody("""{"stop_reason":"max_tokens","content":[
+        {"type":"text","text":"Let me think about which stall"}]}""")
+    except FruitMarketError as error:
+      named = error.msg
+    check "cut off at max_tokens" in named
+    ## A max_tokens stop that still carried the whole object is not an error.
+    check "{" in textOfBody("""{"stop_reason":"max_tokens","content":[
+      {"type":"text","text":"{\"job\":\"rest\"}"}]}""")
 
   test "minTurnSeconds holds the request rate under 30 a minute":
     let config = defaultGameConfig()
