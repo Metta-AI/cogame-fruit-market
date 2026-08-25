@@ -2,7 +2,8 @@
 
 import std/[json, os, strutils, unicode, unittest]
 
-import fruit_market/sim, fruit_market/scripted, fruit_market/replays
+import fruit_market/sim, fruit_market/scripted, fruit_market/replays,
+  fruit_market/broadcast
 
 proc playEpisode(seed = 3, rounds = 12): Sim =
   var config = defaultGameConfig()
@@ -104,6 +105,96 @@ suite "the replay document":
 
   test "the file stays under 8 MiB":
     check getFileSize(path) < 8 * 1024 * 1024
+
+suite "the viewer's display is the recorded state":
+  ## Fruit Market records STATE, not inputs, so playback never re-simulates.
+  ## What has to hold instead is that the bytes the viewer reads ARE the state
+  ## the sim was in, tick by tick, and that the recorded events tell the same
+  ## story as the recorded frames. Both are asserted here.
+  var sim = playEpisode(seed = 4, rounds = 6)
+  let raw = $replayJson(sim, sim.resultsJson())
+  let replay = parseReplay(raw)
+
+  test "every recorded frame survives the parse unchanged":
+    check replay.frames.len == sim.frames.len
+    for index, frame in replay.frames:
+      check frame.t == sim.frames[index].t
+      for i in 0 ..< frame.c.len:
+        check frame.c[i] == sim.frames[index].c[i]
+      for i in 0 ..< frame.o.len:
+        check frame.o[i] == sim.frames[index].o[i]
+      check frame.r == sim.frames[index].r
+
+  test "the chrome frame the viewer draws is that frame, field for field":
+    ## chromeViewOfReplay is the ONLY source the static bundle draws from;
+    ## every number it reports is read positionally out of the frame.
+    for index in countup(0, replay.frames.high, 7):
+      let
+        frame = replay.frames[index]
+        view = chromeViewOfReplay(replay, index, true, 1, false, false,
+          newJArray())
+      check view.tick == frame.t
+      for slot in 0 ..< Seats:
+        let cog = view.cogs[slot]
+        check cog.x == frame.cogAt(slot, 0)
+        check cog.y == frame.cogAt(slot, 1)
+        check cog.apples == frame.cogAt(slot, 2)
+        check cog.bananas == frame.cogAt(slot, 3)
+        check cog.hunger == frame.cogAt(slot, 4)
+        check cog.stamina == frame.cogAt(slot, 5)
+        check cog.score == frame.cogAt(slot, 6)
+        check cog.flags == frame.cogAt(slot, 7)
+        check cog.offerGive == frame.offerAt(slot, 0)
+        check cog.offerGiveN == frame.offerAt(slot, 1)
+        check cog.offerWantN == frame.offerAt(slot, 2)
+        check cog.offerUnfunded == (frame.offerAt(slot, 3) != 0)
+
+  test "replaying the recorded events reproduces the recorded frames":
+    ## The events are the audit trail ("all offers logged"); the frames are
+    ## what the viewer draws. Walk the events tick by tick, keep the books
+    ## they imply, and require them to agree with EVERY frame: a harvest that
+    ## never landed, a trade recorded on one side only or an eat that scored
+    ## the wrong seat all fail here.
+    var
+      apples: array[Seats, int]
+      bananas: array[Seats, int]
+      score: array[Seats, int]
+      rows = 0
+    proc give(slot: int, fruit: string, n: int) =
+      if fruit == "apple": apples[slot] += n else: bananas[slot] += n
+    var events: seq[JsonNode]
+    for row in parseJson(raw)["events"]:
+      events.add(row)
+    var at = 0
+    for index, frame in replay.frames:
+      while at < events.len and events[at]["t"].getInt() <= frame.t:
+        let row = events[at]
+        at.inc
+        rows.inc
+        case row["k"].getStr()
+        of "harvest":
+          give(row["seat"].getInt(), row["fr"].getStr(), row["n"].getInt())
+        of "eat":
+          give(row["seat"].getInt(), row["fr"].getStr(), -1)
+          score[row["seat"].getInt()] += row["points"].getInt()
+        of "trade":
+          let
+            a = row["a"].getInt()
+            b = row["b"].getInt()
+          give(a, row["aGive"].getStr(), -row["aGiveN"].getInt())
+          give(b, row["bGive"].getStr(), -row["bGiveN"].getInt())
+          give(a, row["bGive"].getStr(), row["bGiveN"].getInt())
+          give(b, row["aGive"].getStr(), row["aGiveN"].getInt())
+        else:
+          discard
+      for slot in 0 ..< Seats:
+        check apples[slot] == frame.cogAt(slot, 2)
+        check bananas[slot] == frame.cogAt(slot, 3)
+        check score[slot] == frame.cogAt(slot, 6)
+    check rows > 0
+    ## And the results block the replay carries is the same arithmetic again.
+    for slot in 0 ..< Seats:
+      check replay.results["scores"][slot].getInt() == score[slot]
 
 suite "rune-boundary truncation":
   test "a say and notes of multi-byte runes are cut on rune boundaries":
