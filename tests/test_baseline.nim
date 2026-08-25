@@ -76,7 +76,7 @@ suite "the scripted baselines are bounded and legal":
             of 0: skHauler
             of 1: skHomesteader
             else: (if slot < 4: skHauler else: skHomesteader)
-        for seed in 1 .. 3:
+        for seed in 1 .. 12:
           var sim = initSim(configFor(variant, seed))
           var lastScores: array[Seats, int]
           var worstRoundMs = 0.0
@@ -85,9 +85,10 @@ suite "the scripted baselines are bounded and legal":
             let started = epochTime()
             for slot in 0 ..< Seats:
               orders[slot] = scriptedOrder(sim, slot, kinds[slot])
-              sim.checkOrder(slot, orders[slot])
             worstRoundMs = max(worstRoundMs,
               (epochTime() - started) * 1000.0)
+            for slot in 0 ..< Seats:
+              sim.checkOrder(slot, orders[slot])
             sim.setRoundOrders(orders)
             for _ in 0 ..< sim.config.ticksPerRound:
               sim.stepTick()
@@ -97,8 +98,11 @@ suite "the scripted baselines are bounded and legal":
               sim.finish("complete", "round_limit")
           check sim.ticksPlayed == sim.config.totalTicks()
           ## Deciding a whole round of eight scripted orders is a Dijkstra per
-          ## seat over 576 cells: it has to stay off the critical path.
-          check worstRoundMs < 50.0
+          ## seat over 576 cells: it has to stay off the critical path, and the
+          ## design note's budget for it is 1 ms per round. Only the decision
+          ## is timed — the unittest `check` calls that police the order are
+          ## the harness, not the baseline.
+          check worstRoundMs < 1.0
 
 suite "two haulers of opposite type in range always clear":
   test "within two ticks, on every variant":
