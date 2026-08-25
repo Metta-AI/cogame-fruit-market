@@ -22,6 +22,12 @@ type
     offerWantN*: int
     offerUnfunded*: bool
 
+  GuildTally* = object
+    ## What each guild has done in the market so far: the plate's sub-line.
+    trades*: int      ## executed trades its members took part in
+    volume*: int      ## fruit units its members gave away
+    rateX100*: int    ## mean apples-per-banana over those trades
+
   ChromeView* = object
     tick*, maxTick*, startTick*: int
     rounds*, ticksPerRound*: int
@@ -43,6 +49,27 @@ type
     beats*: seq[Beat]
     over*: JsonNode
     summary*: string
+    guilds*: array[2, GuildTally]   ## indexed by fruitId of the farm type
+
+proc addTrade(tallies: var array[2, GuildTally],
+    farmTypes: array[Seats, Fruit], a, b, aGiveN, bGiveN, rateX100: int) =
+  ## One executed trade, counted for BOTH sides. `volume` is what that seat
+  ## gave away, exactly as results.json defines it.
+  for (slot, given) in [(a, aGiveN), (b, bGiveN)]:
+    if slot < 0 or slot >= Seats:
+      continue
+    let guild = fruitId(farmTypes[slot])
+    tallies[guild].trades.inc
+    tallies[guild].volume += given
+    tallies[guild].rateX100 += rateX100
+
+proc meanRates(tallies: var array[2, GuildTally]) =
+  for guild in 0 .. 1:
+    tallies[guild].rateX100 =
+      if tallies[guild].trades > 0:
+        tallies[guild].rateX100 div tallies[guild].trades
+      else:
+        CanonicalRateX100
 
 proc guildOf*(fruit: Fruit): string =
   if fruit == fApple: "apple" else: "banana"
@@ -56,10 +83,10 @@ proc teamsJson(view: ChromeView): JsonNode =
   ## in the page.
   result = newJObject()
   for fruit in [fApple, fBanana]:
-    var
-      total = 0
-      trades = 0
-      volume = 0
+    var total = 0
+    let
+      trades = view.guilds[fruitId(fruit)].trades
+      volume = view.guilds[fruitId(fruit)].volume
     for slot in 0 ..< Seats:
       if view.farmTypes[slot] != fruit:
         continue
@@ -71,7 +98,8 @@ proc teamsJson(view: ChromeView): JsonNode =
       "prog": 0,
       "policies": [guildLabel(fruit)],
       "trades": trades,
-      "volume": volume
+      "volume": volume,
+      "rate": view.guilds[fruitId(fruit)].rateX100
     }
 
 proc rosterJson(view: ChromeView): JsonNode =
@@ -280,6 +308,11 @@ proc chromeViewOfSim*(sim: Sim, events: JsonNode, sendLead: bool): ChromeView =
       offerGiveN: cog.offer.giveN,
       offerWantN: cog.offer.wantN,
       offerUnfunded: cog.offer.unfunded)
+  for event in sim.events:
+    if event.kind == evTrade:
+      addTrade(result.guilds, result.farmTypes, event.a, event.b,
+        event.aGiveN, event.bGiveN, event.applesPerBanana)
+  meanRates(result.guilds)
   if sim.done:
     let results = sim.resultsJson()
     result.over = overJson(results, result.names, result.policyNames,
@@ -321,6 +354,17 @@ proc chromeViewOfReplay*(replay: Replay, index: int, playing: bool,
       offerGiveN: frame.offerAt(slot, 1),
       offerWantN: frame.offerAt(slot, 2),
       offerUnfunded: frame.offerAt(slot, 3) != 0)
+  ## The guild tallies are re-derived from the RECORDED trade events up to the
+  ## playhead, so a seek backwards shows the market as it stood then rather
+  ## than an accumulated count.
+  for row in replay.events:
+    if row{"k"}.getStr() != "trade" or row{"t"}.getInt() > frame.t:
+      continue
+    addTrade(result.guilds, result.farmTypes,
+      row{"a"}.getInt(-1), row{"b"}.getInt(-1),
+      row{"aGiveN"}.getInt(), row{"bGiveN"}.getInt(),
+      row{"applesPerBanana"}.getInt())
+  meanRates(result.guilds)
   if index >= replay.frames.high:
     result.over = overJson(replay.results, replay.names, replay.policyNames,
       replay.farmTypes)

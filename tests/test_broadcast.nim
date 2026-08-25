@@ -47,6 +47,33 @@ suite "the chrome frame":
     check mid["teams"]["apple"]["lives"].getInt() == apple
     check mid["teams"]["banana"]["lives"].getInt() == banana
 
+  test "each plate carries its guild's trade count, volume and mean rate":
+    ## Re-derived from the RECORDED trade events up to the playhead, so the
+    ## numbers a seek shows are the numbers that tick really had.
+    var
+      trades = [0, 0]
+      volume = [0, 0]
+      rateSum = [0, 0]
+    for row in replay.events:
+      if row["k"].getStr() != "trade" or row["t"].getInt() > replay.maxTick():
+        continue
+      for (slot, given) in [(row["a"].getInt(), row["aGiveN"].getInt()),
+          (row["b"].getInt(), row["bGiveN"].getInt())]:
+        let guild = fruitId(replay.farmTypes[slot])
+        trades[guild].inc
+        volume[guild] += given
+        rateSum[guild] += row["applesPerBanana"].getInt()
+    check trades[0] + trades[1] > 0            ## the fixture really traded
+    for fruit in [fApple, fBanana]:
+      let
+        guild = fruitId(fruit)
+        plate = final["teams"][(if fruit == fApple: "apple" else: "banana")]
+      check plate["trades"].getInt() == trades[guild]
+      check plate["volume"].getInt() == volume[guild]
+      check plate["rate"].getInt() ==
+        (if trades[guild] > 0: rateSum[guild] div trades[guild]
+         else: CanonicalRateX100)
+
   test "the roster carries the alias in name and the POLICY name in pol":
     check mid["roster"].len == Seats
     for entry in mid["roster"]:
@@ -205,6 +232,11 @@ suite "the appended game block":
     for alias in ChromeAliases:
       check ("function " & alias & "(") notin appended
       check ("function " & alias & " (") notin appended
+
+  test "the plate sub-line draws the trade count and the mean rate":
+    check ".fm-plate-sub" in page
+    check "renderPlateSub" in page
+    check "' trades " in page
 
   test "a cleared offer's book row is struck through before it drops":
     ## An executed offer is CONSUMED on both sides, so it leaves the book on

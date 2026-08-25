@@ -2316,6 +2316,18 @@ body[data-embed] #board { top: 0; height: 100%; }
   .fm-book-stall { display: none; }
 }
 
+/* --- guild plate sub-line: the trade count and mean rate under the plate's
+   big number (which is the guild's total score). --- */
+.fm-plate-sub {
+  font-family: var(--pixfont);
+  font-size: calc(7 * var(--u));
+  color: var(--paper-dim);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* --- roster strip: eight chips in score order, under the scorebug. The
    POLICY name appears here and only here (plus results.names); the board and
    every prompt show the alias. --- */
@@ -2581,6 +2593,30 @@ body[data-embed] #board { top: 0; height: 100%; }
     bookRows.innerHTML = html;
   }
 
+  // ---- guild plates -------------------------------------------------------
+  // The plate's big number is the guild's total score (the starter's own
+  // `lives-<k>` line, re-lettered `Score`). Underneath it goes the guild's
+  // trade count and mean rate, appended into the starter's plate rather than
+  // replacing any of it.
+  function renderPlateSub(s) {
+    var teams = s.teams || {};
+    ['apple', 'banana'].forEach(function (k) {
+      var host = document.querySelector('.plate[data-team="' + k + '"] .team-id');
+      if (!host) return;
+      var el = $('fm-plate-' + k);
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'fm-plate-' + k;
+        el.className = 'fm-plate-sub';
+        host.appendChild(el);
+      }
+      var t = teams[k] || {};
+      var text = (t.trades || 0) + ' trades \u00b7 ' + rate(t.rate || 0) +
+        ' \ud83c\udf4e/\ud83c\udf4c';
+      if (el.textContent !== text) el.textContent = text;
+    });
+  }
+
   // ---- clock --------------------------------------------------------------
   // Spelled out, never `R4`. Overwrites the inherited countdown, which counts
   // to a draw limit this game does not have.
@@ -2712,6 +2748,7 @@ body[data-embed] #board { top: 0; height: 100%; }
       var jumped = (s.t < lastTick) || (lastTick >= 0 && s.t - lastTick > 80);
       if (jumped && feedEl) feedEl.innerHTML = '';
       renderRoster(s);
+      renderPlateSub(s);
       renderBook(s);
       renderMarketClock(s);
       buildMarketBeats(s, seek, C);
