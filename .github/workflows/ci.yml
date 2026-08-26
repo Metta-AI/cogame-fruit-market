@@ -111,7 +111,7 @@ jobs:
           # would only ever run its local half.
           python3 -m venv "${RUNNER_TEMP}/coworld-venv"
           "${RUNNER_TEMP}/coworld-venv/bin/pip" install --quiet \
-            "coworld[auth]==0.1.42"
+            "coworld[auth]==0.1.43"
           "${RUNNER_TEMP}/coworld-venv/bin/python" \
             tools/ci/check_manifest_loads.py coworld_manifest_template.json
 
