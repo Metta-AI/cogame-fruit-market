@@ -34,3 +34,26 @@ Qwen2.5-0.5B-Instruct tokenizer in 4,096 tokens; the maximum was 1,986. One
 CPU optimizer step per variant with a local tiny model verifies the Metta
 post-training path. These examples distill the scripted teacher; they do not
 establish stronger league play.
+
+# Numeric reinforcement learning
+
+Compile the persistent bridge and pass the binary, manifest, and variant to
+Metta's `recipes.external.coworld.train` (native PufferLib) or
+`recipes.external.coworld_metta_rl.train` (Metta RL):
+
+```sh
+nimby sync nimby.lock
+nim c -d:release --path:src -o:/tmp/fruit-market-train-bridge tools/train_bridge.nim
+python tools/test_train_bridge.py /tmp/fruit-market-train-bridge
+```
+
+All four certified variants expose 326 numeric observation values and five
+factorized action heads: job (4 choices), fruit (default, apple, banana),
+stall (default plus four stalls), eat (3), and offer (keep, withdraw, or 72
+bounded give/want contracts). The observation uses the same per-seat view as
+the hosted prompt: own state, local map and visible offers, public stalls,
+and own recent history. Hidden opponent state remains hidden. Each decision
+uses the native reply parser, and the simulator advances only after all eight
+seats submit standing orders. The published hauler supplies teacher actions.
+The numeric policy omits spectator text and private notes; the post-training
+exporter retains them.
