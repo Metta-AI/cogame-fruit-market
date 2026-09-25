@@ -1,9 +1,7 @@
-## Fruit Market player: a policy is just a prompt.
+## Fruit Market player: prompt, scripted, or external Jev policy.
 ##
-## Forked from `cogame-bullwhip/src/bullwhip_player.nim`. This process connects,
-## delivers its prompt, and then only listens — every decision is made inside
-## the game container, which is what makes ONE parallel batch of eight requests
-## per round possible.
+## Prompt seats deliver guidance to the game. PLAYER_JEV=1 ranks complete
+## standing orders from the normal seat observation in this player process.
 ##
 ## `PLAYER_SCRIPTED=hauler` registers the seat as the market-making baseline
 ## and `PLAYER_SCRIPTED=homesteader` as the autarky foil; the server plays
@@ -15,6 +13,7 @@
 
 import
   std/[json, options, os, strutils, times],
+  fruit_market/jev_policy,
   whisky
 
 const
@@ -30,20 +29,28 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
   var scripted = getEnv("PLAYER_SCRIPTED").strip()
-  if prompt.len == 0 and scripted.len == 0:
+  let jevRequested = getEnv("PLAYER_JEV") == "1"
+  let jev = jevRequested and (
+    getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
+    getEnv("METTA_CAPTURE_URL").strip().len > 0 or
+    getEnv("TYPESAFE_API_KEY").strip().len > 0)
+  if prompt.len == 0 and scripted.len == 0 and not jev:
     ## A seat that sets NEITHER is `PLAYER_SCRIPTED=hauler` (design note
     ## "Decisions"): the scripted baseline, not an unconfigured LLM seat
     ## quietly playing a stock prompt on the operator's credentials.
     scripted = "hauler"
 
   proc promptFrame(): string =
-    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    if jev: $ %*{"type": "register", "control": "external"}
+    else: $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
 
   echo "fruit-market player: connecting to game"
   let socket = newWebSocket(url)
   socket.send(promptFrame())
-  echo "fruit-market player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
+  echo "fruit-market player: registered ",
+    (if jev: "Jev external policy"
+     elif scripted.len > 0: "scripted " & scripted
+     else: "prompt policy")
 
   var
     registeredAt = epochTime()
@@ -89,6 +96,11 @@ when isMainModule:
         ## raced the server's slot registration.
         socket.send(promptFrame())
         registeredAt = epochTime()
+      of "state":
+        if jev and not payload["done"].getBool() and
+            payload["tick"].getInt() < payload["rounds"].getInt() *
+              payload["ticksPerRound"].getInt():
+          socket.send($chooseOrder(payload))
       of "final":
         echo "fruit-market player: final scores ", payload{"scores"}
         break

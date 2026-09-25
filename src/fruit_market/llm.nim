@@ -235,6 +235,7 @@ proc observationJson*(sim: Sim, slot: int): JsonNode =
     "rounds": sim.config.rounds,
     "ticksPerRound": sim.config.ticksPerRound,
     "tick": sim.tick,
+    "done": sim.done,
     "board": {
       "cols": Cols, "rows": Rows, "variant": sim.config.variantId()},
     "you": {

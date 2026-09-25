@@ -35,6 +35,9 @@ type
     sim: Sim
     prompts: array[Seats, string]
     scripted: array[Seats, ScriptKind]
+    external: array[Seats, bool]
+    externalOrders: array[Seats, Order]
+    orderReceived: array[Seats, bool]
     registered: array[Seats, bool]
     connected: array[Seats, bool]
     playerSockets: Table[int, WebSocket]
@@ -198,6 +201,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           anyConnected = true
       echo "fruit-market: starting with ", state.playerSockets.len, "/",
         config.numAgents, " players connected"
+      state.sendPlayerStates()
 
     if not anyConnected:
       ## No seat connected within playerConnectTimeoutSeconds: forfeit. All
@@ -228,6 +232,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         prompts: array[Seats, string]
         scripts: array[Seats, ScriptKind]
         connected: array[Seats, bool]
+        external: array[Seats, bool]
       withLock stateLock:
         if state.sim.done:
           break
@@ -241,6 +246,10 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         prompts = state.prompts
         scripts = state.scripted
         connected = state.connected
+        external = state.external
+        for slot in 0 ..< Seats:
+          if external[slot]:
+            scripts[slot] = skHauler
 
       ## `minTurnSeconds` floors the spacing between BATCH STARTS, so the
       ## episode issues at most 8 requests / minTurnSeconds — under the Bedrock
@@ -253,11 +262,32 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (one parallel batch of eight) runs OUTSIDE the lock on a
       ## snapshot; only this thread mutates the sim, so it cannot go stale.
-      let orders = client.decideAll(simCopy, prompts, scripts, connected)
+      var orders = client.decideAll(simCopy, prompts, scripts, connected)
+      let orderDeadline = lastBatchStart +
+        2.0 * config.llmTimeoutSeconds.float + 2.0
+      while epochTime() < orderDeadline:
+        var allReceived = true
+        withLock stateLock:
+          for slot in 0 ..< Seats:
+            if external[slot] and state.connected[slot] and
+                not state.orderReceived[slot]:
+              allReceived = false
+        if allReceived:
+          break
+        sleep(20)
 
       withLock stateLock:
+        for slot in 0 ..< Seats:
+          if external[slot]:
+            if state.orderReceived[slot]:
+              orders[slot] = state.externalOrders[slot]
+            else:
+              orders[slot] = scriptedOrder(state.sim, slot, skHauler)
+              orders[slot].source = osFallback
         state.sim.setRoundOrders(orders)
         state.sim.runRound()
+        for slot in 0 ..< Seats:
+          state.orderReceived[slot] = false
         echo "fruit-market: round ", state.sim.roundsPlayed, " of ",
           config.rounds, " done at ", (epochTime() - gameStart).int, "s"
         state.broadcastLocked()
@@ -365,6 +395,26 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
         return
       try:
         let payload = parseJson(message.data)
+        if payload{"type"}.getStr() == "register" and
+            payload{"control"}.getStr() == "external":
+          withLock stateLock:
+            state.external[slot] = true
+            state.registered[slot] = true
+          echo "fruit-market: slot ", slot, " registered an external policy"
+          return
+        if payload{"type"}.getStr() == "order":
+          let round = payload["round"].getInt()
+          withLock stateLock:
+            if state.external[slot] and state.started and
+                not state.sim.done and state.sim.roundOf() == round and
+                not state.orderReceived[slot]:
+              var order = parseOrder(payload["order"], state.sim, slot)
+              order.source = osExternal
+              state.externalOrders[slot] = order
+              state.orderReceived[slot] = true
+              echo "fruit-market: slot ", slot,
+                " submitted standing order for round ", round
+          return
         if payload{"type"}.getStr() != "prompt":
           echo "fruit-market: ignoring player frame of type ",
             payload{"type"}.getStr()
@@ -382,6 +432,7 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           firstTime = not state.registered[slot]
           state.prompts[slot] = prompt
           state.scripted[slot] = kind
+          state.external[slot] = false
           state.registered[slot] = true
         if firstTime:
           echo "fruit-market: slot ", slot, " registered (", prompt.len,

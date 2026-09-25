@@ -134,6 +134,7 @@ type
     osScripted = "scripted"
     osLlm = "llm"
     osRetry = "retry"
+    osExternal = "external"
     osFallback = "fallback"
 
   ScriptKind* = enum
