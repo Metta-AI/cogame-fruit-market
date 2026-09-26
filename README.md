@@ -38,15 +38,13 @@ coworld upload-policy coworld-fruit-market:latest \
 Prompt players send one `{"type":"prompt", …}` frame. The game asks Claude
 for those seats' orders in one parallel batch per round. External players
 receive the same seat observation and submit a complete standing order through
-their player socket. The optional Jev policy ranks orders in its own player
-process. One image also carries both scripted baselines, selected by env var:
+their player socket. One image also carries both scripted baselines, selected by env var:
 
 | env | seat plays |
 | --- | --- |
 | `PLAYER_PROMPT="<strategy in words>"` | an LLM seat |
 | `PLAYER_SCRIPTED=hauler` | the market maker: bank three of your own fruit, walk to the round's rendezvous stall, post the book price (three of yours for two of theirs) |
 | `PLAYER_SCRIPTED=homesteader` | the autarky foil: never trade, farm your own grove, trek across both rivers for the fruit you crave |
-| `PLAYER_JEV=1` | an external Jev player using a seat-local System One route |
 | neither | `hauler` |
 
 An external player registers with `{"type":"register","control":"external"}`.
@@ -82,7 +80,6 @@ drawn in the viewer and recorded in the replay and never reaches another seat.
 | `src/fruit_market/` | the sim: `sim_types`, `board`, `sim_config`, `sim_state`, `events`, `market`, `kernel`, `sim`, `scripted`, `llm`, `replays`, `broadcast`, `global`, `server`, `wire_constants` |
 | `src/fruit_market.nim` | the game entrypoint (`/bin/fruit-market`) |
 | `src/fruit_market_player.nim` | the seat process (`/bin/fruit-market-player`) |
-| `src/fruit_market/jev_policy.nim` | player-side System One order ranking |
 | `client/` | the broadcast chrome: `chrome_common.js` byte-for-byte from `coworld-ctf`, `broadcast_core.js` forked, `replay_broadcast.html` = the starter's page with the game block appended |
 | `replay-viewer/` | the static wasm bundle: `fruit_market_replay.nim`, `config.nims`, `static_replay.js`, `static_replay_worker.js` |
 | `scripts/art/` | the nano-banana source renders and the split script that produces every file in `data/` |
@@ -98,7 +95,6 @@ nimby use 2.2.4 && nimby --global sync nimby.lock
 nim r -d:release --path:src tests/test_sim.nim     # any suite
 docker build --platform=linux/amd64 -t coworld-fruit-market:ci .
 tools/ci/docker_smoke.sh coworld-fruit-market:ci   # one real 8-seat episode
-python3 tools/ci/jev_smoke.py coworld-fruit-market:ci  # mock Jev with 7 scripted seats
 tools/build_replay_viewer.sh "$PWD/dist/static-replay-viewer"
 ```
 
