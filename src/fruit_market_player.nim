@@ -1,7 +1,6 @@
-## Fruit Market player: prompt, scripted, or external Jev policy.
+## Fruit Market player: prompt or scripted policy.
 ##
-## Prompt seats deliver guidance to the game. PLAYER_JEV=1 ranks complete
-## standing orders from the normal seat observation in this player process.
+## Prompt seats deliver guidance to the game.
 ##
 ## `PLAYER_SCRIPTED=hauler` registers the seat as the market-making baseline
 ## and `PLAYER_SCRIPTED=homesteader` as the autarky foil; the server plays
@@ -13,7 +12,6 @@
 
 import
   std/[json, options, os, strutils, times],
-  fruit_market/jev_policy,
   whisky
 
 const
@@ -29,27 +27,20 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
   var scripted = getEnv("PLAYER_SCRIPTED").strip()
-  let jevRequested = getEnv("PLAYER_JEV") == "1"
-  let jev = jevRequested and (
-    getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
-    getEnv("METTA_CAPTURE_URL").strip().len > 0 or
-    getEnv("TYPESAFE_API_KEY").strip().len > 0)
-  if prompt.len == 0 and scripted.len == 0 and not jev:
+  if prompt.len == 0 and scripted.len == 0:
     ## A seat that sets NEITHER is `PLAYER_SCRIPTED=hauler` (design note
     ## "Decisions"): the scripted baseline, not an unconfigured LLM seat
     ## quietly playing a stock prompt on the operator's credentials.
     scripted = "hauler"
 
   proc promptFrame(): string =
-    if jev: $ %*{"type": "register", "control": "external"}
-    else: $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
 
   echo "fruit-market player: connecting to game"
   let socket = newWebSocket(url)
   socket.send(promptFrame())
   echo "fruit-market player: registered ",
-    (if jev: "Jev external policy"
-     elif scripted.len > 0: "scripted " & scripted
+    (if scripted.len > 0: "scripted " & scripted
      else: "prompt policy")
 
   var
@@ -96,11 +87,6 @@ when isMainModule:
         ## raced the server's slot registration.
         socket.send(promptFrame())
         registeredAt = epochTime()
-      of "state":
-        if jev and not payload["done"].getBool() and
-            payload["tick"].getInt() < payload["rounds"].getInt() *
-              payload["ticksPerRound"].getInt():
-          socket.send($chooseOrder(payload))
       of "final":
         echo "fruit-market player: final scores ", payload{"scores"}
         break
