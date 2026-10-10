@@ -109,17 +109,59 @@ suite "the transport keys the page sends":
     state.commands = @['-']
     state.advanceReplay(replay)
     check state.speed == 3
-    ## The ladder ends where PlaybackSpeeds ends, in both directions.
+    ## The ladder tops out where PlaybackSpeeds ends and bottoms out one rung
+    ## BELOW it, on the replay-only 1/2x sentinel.
     state.commands = @['+', '+', '+', '+', '+']
     state.advanceReplay(replay)
     check state.speed == PlaybackSpeeds[^1]
     state.commands = @['-', '-', '-', '-', '-', '-', '-']
+    state.advanceReplay(replay)
+    check state.speed == ReplayHalfSpeed
+    state.commands = @['+']
     state.advanceReplay(replay)
     check state.speed == PlaybackSpeeds[0]
     ## And a numeric key still selects directly.
     state.commands = @['8']
     state.advanceReplay(replay)
     check state.speed == 8
+
+  test "half speed is a replay-only crawl":
+    ## The fleet-wide 1/2x replay speed: command '5' selects the
+    ## ReplayHalfSpeed sentinel, the chrome shows 0.5, and the playhead
+    ## advances one frame every OTHER presentation frame (halfPhase parity).
+    var sim = bench()
+    sim.setRoundOrders(default(array[Seats, Order]))
+    for tick in 0 ..< 20:
+      sim.stepTick()
+    let replay = parseReplay($replayJson(sim, sim.resultsJson()))
+    var state = initViewerState()
+    state.commands = @['5']
+    state.advanceReplay(replay)
+    check state.speed == ReplayHalfSpeed
+    check state.displaySpeed() == 0.5
+    ## Ten frames from the start advance the playhead five ticks.
+    state.index = 0
+    state.playing = true
+    state.halfPhase = false
+    var advanced = 0
+    for frame in 0 ..< 10:
+      let before = state.index
+      state.advanceReplay(replay)
+      if state.index != before:
+        advanced.inc
+      check state.index - before <= 1
+    check advanced == 5
+    ## '-' from 1x lands on 1/2x, the floor; '+' climbs back out onto 1x.
+    state.commands = @['1', '-']
+    state.advanceReplay(replay)
+    check state.speed == ReplayHalfSpeed
+    state.commands = @['-']
+    state.advanceReplay(replay)
+    check state.speed == ReplayHalfSpeed
+    state.commands = @['+']
+    state.advanceReplay(replay)
+    check state.speed == PlaybackSpeeds[0]
+    check state.displaySpeed() == 1.0
 
 suite "every drawn overlay fits the board":
   test "a full bubble, a tag, a bar and an alias on every seat, at the edges":

@@ -60,6 +60,12 @@ const
   BubbleH = 26
   TagH = 12
 
+const
+  ReplayHalfSpeed* = 0
+    ## `speed` sentinel for the replay-only 1/2x playback (command '5'):
+    ## the playhead advances one frame every OTHER presentation frame
+    ## (halfPhase parity).
+
 type
   ViewerState* = object
     ## One viewer. The wasm bundle owns exactly one; the live `/global` server
@@ -68,6 +74,10 @@ type
     index*: int              ## playhead: an index into `replay.frames`
     playing*: bool
     speed*: int
+      ## Integer playback multiplier, or ReplayHalfSpeed (0) for 1/2x.
+    halfPhase*: bool
+      ## Frame parity while at 1/2x speed: the playhead advances only on the
+      ## odd frames, toggled once per advanceReplay frame.
     looping*: bool
     seekTick*: int           ## queued seek, -1 = none
     pendingSeek*: int        ## a click that arrived before the first frame
@@ -551,20 +561,33 @@ proc buildPacket*(state: var ViewerState, board: ReplayBoard,
   result.addSprite(BroadcastChromeSpriteId, 1, 1, [0'u8, 0, 0, 0], chrome)
   state.frameCounter.inc
 
+proc displaySpeed*(state: ViewerState): float =
+  ## The speed the chrome shows: 0.5 at the half-speed sentinel, else the
+  ## integer multiplier.
+  if state.speed == ReplayHalfSpeed: 0.5
+  else: float(state.speed)
+
 proc steppedSpeed(current, step: int): int =
   ## The `+` / `-` transport keys walk the SAME speed ladder the number keys
   ## select from (paintbot's `applySpeedCommand`). The page sends them; without
-  ## this they fell through to `else: discard` and did nothing.
+  ## this they fell through to `else: discard` and did nothing. The ladder now
+  ## reaches one rung below 1x: '-' from 1x lands on the 1/2x sentinel, the
+  ## floor, and '+' climbs back out onto 1x.
+  if current == ReplayHalfSpeed:
+    return (if step > 0: PlaybackSpeeds[0] else: ReplayHalfSpeed)
   var index = 0
   for i, value in PlaybackSpeeds:
     if value == current:
       index = i
+  if index + step < 0:
+    return ReplayHalfSpeed
   PlaybackSpeeds[clamp(index + step, 0, PlaybackSpeeds.high)]
 
 proc advanceReplay*(state: var ViewerState, replay: Replay) =
   ## Applies the queued transport commands and advances the playhead one
   ## presentation frame. A seek that arrives before the first chrome frame is
   ## QUEUED and converged with a bounded per-frame walk, never dropped.
+  state.halfPhase = not state.halfPhase
   let last = replay.frames.high
   for command in state.commands:
     case command
@@ -577,6 +600,7 @@ proc advanceReplay*(state: var ViewerState, replay: Replay) =
     of 'f': discard      ## skip-lulls: this game ships no lull spans
     of '+', '=': state.speed = steppedSpeed(state.speed, 1)
     of '-', '_': state.speed = steppedSpeed(state.speed, -1)
+    of '5': state.speed = ReplayHalfSpeed
     of '1': state.speed = 1
     of '2': state.speed = 2
     of '3': state.speed = 3
@@ -599,7 +623,13 @@ proc advanceReplay*(state: var ViewerState, replay: Replay) =
     return
   if not state.playing:
     return
-  state.index += max(1, state.speed)
+  if state.speed == ReplayHalfSpeed:
+    ## 1/2x: the playhead advances only every other presentation frame.
+    if not state.halfPhase:
+      return
+    state.index += 1
+  else:
+    state.index += max(1, state.speed)
   if state.index > last:
     if state.looping:
       state.index = 0
