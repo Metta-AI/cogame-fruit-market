@@ -64,10 +64,10 @@ suite "the manifest template":
     check game.hasKey("owner")
     check fileExists(RepoRoot / "tools" / "build_replay_viewer.sh")
 
-  test "game.name matches the secret namespace and the repo slug":
+  test "hosted inference needs no provider secret":
     check game["name"].getStr() == "fruit-market"
-    let uri = game["runnable"]["env"]["ANTHROPIC_API_KEY_URI"].getStr()
-    check uri == "secret://coworld/" & game["name"].getStr() & "/anthropic_api_key"
+    doAssert game{"runnable"}{"env"}{"ANTHROPIC_API_KEY_URI"}.isNil,
+      "hosted LLM uses the platform sidecar without provider secrets"
     check game["runnable"]["type"].getStr() == "game"
     check game["runnable"]["run"][0].getStr() == "/bin/fruit-market"
 
