@@ -33,7 +33,7 @@ type
     rounds*, ticksPerRound*: int
     phase*: string        ## lobby | playing | gameover
     playing*: bool
-    speed*: int
+    speed*: float        ## 0.5 at the replay-only 1/2x, else the integer speed
     looping*: bool
     transportEnabled*: bool
     boardScale*: int
@@ -279,7 +279,7 @@ proc chromeViewOfSim*(sim: Sim, events: JsonNode, sendLead: bool): ChromeView =
   result.ticksPerRound = sim.config.ticksPerRound
   result.phase = if sim.done: "gameover" else: "playing"
   result.playing = not sim.done
-  result.speed = 1
+  result.speed = 1.0
   result.looping = false
   result.transportEnabled = false
   result.boardScale = 1
@@ -320,7 +320,7 @@ proc chromeViewOfSim*(sim: Sim, events: JsonNode, sendLead: bool): ChromeView =
     result.summary = ""
 
 proc chromeViewOfReplay*(replay: Replay, index: int, playing: bool,
-    speed: int, looping: bool, sendLead: bool, events: JsonNode): ChromeView =
+    speed: float, looping: bool, sendLead: bool, events: JsonNode): ChromeView =
   ## The static-bundle frame: the same shape, read out of the replay bytes.
   let frame = replay.frames[clamp(index, 0, replay.frames.high)]
   result.tick = frame.t

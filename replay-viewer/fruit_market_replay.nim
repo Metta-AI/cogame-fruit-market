@@ -54,7 +54,7 @@ proc renderCurrent(events: JsonNode) =
   ## 2026-08-24).
   let sendLead = not leadSent
   let view = chromeViewOfReplay(replay, viewer.index, viewer.playing,
-    viewer.speed, viewer.looping, sendLead, events)
+    viewer.displaySpeed(), viewer.looping, sendLead, events)
   if sendLead:
     leadSent = true
   let frame = replay.frames[clamp(viewer.index, 0, replay.frames.high)]
