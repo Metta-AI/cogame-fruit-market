@@ -19,7 +19,7 @@ import
   std/[json, os, strutils, times],
   bitworld/runtime,
   curly,
-  ./sim_types, ./sim_config, ./board, ./sim_state, ./sim, ./scripted
+  ./sim_types, ./sim_config, ./board, ./sim_state, ./sim, ./scripted, ./prompts, ./evidence
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -35,6 +35,8 @@ type
     ltNone, ltSidecar, ltBedrock, ltAnthropic
 
   LlmClient* = ref object
+    attemptIds*: array[Seats, seq[string]]
+    selectedAttemptIds*: array[Seats, string]
     curl: Curly
     transport: LlmTransport
     apiKey: string
@@ -159,6 +161,16 @@ proc offerJson(offer: Offer): JsonNode =
     "unfunded": offer.unfunded,
     "postedRound": offer.postedRound
   }
+
+proc orderJson*(order: Order): JsonNode =
+  result = %*{"job": $order.job, "eat": $order.eat,
+    "say": order.say, "notes": order.notes}
+  if order.hasFruit: result["fruit"] = %($order.fruit)
+  if order.hasStall: result["stall"] = %($order.stall)
+  if order.hasOfferKey:
+    result["offer"] = if order.withdraw: newJNull() else:
+      %*{"give": {"fruit": $order.offer.giveFruit, "n": order.offer.giveN},
+        "want": {"fruit": $order.offer.wantFruit, "n": order.offer.wantN}}
 
 proc observationJson*(sim: Sim, slot: int): JsonNode =
   ## The `state` frame, sent at every round boundary and at episode end, and
@@ -308,13 +320,13 @@ proc observationJson*(sim: Sim, slot: int): JsonNode =
 
 # ---- prompts ----------------------------------------------------------------
 
-proc systemPrompt*(sim: Sim, slot: int): string =
+proc systemPrompt*(sim: Sim, slot: int, selection: PromptSelection): string =
   let
     cog = sim.cogs[slot]
     me = sim.aliases[slot].toUpperAscii()
     mine = $cog.farm
     craved = $cog.craved()
-  result.add("You are " & me & ", a " & mine & " farmer in Fruit Market.\n\n")
+  result.add(selection.introduction(me, mine) & "\n\n")
   result.add("""THE BOARD (fixed, identical every episode): a 32 x 18 walled
 grid of four concentric belts. The OUTER RING is the apple grove (24 apple
 trees). Inside it runs the OUTER RIVER, one cell wide. Inside that is the
@@ -651,7 +663,8 @@ proc buildBatch*(
   sim: Sim,
   prompts: array[Seats, string],
   open: seq[int],
-  attempt: int
+  attempt: int,
+  selection: PromptSelection
 ): RequestBatch =
   ## ONE request per open seat, in ONE batch. Decisions inside a round are
   ## simultaneous by rule, so `decideAll` issues this whole batch in parallel;
@@ -661,7 +674,20 @@ proc buildBatch*(
     var user = sim.userPrompt(slot, prompts[slot])
     if attempt > 0:
       user.add(RetryHint)
-    let request = client.requestFor(sim.systemPrompt(slot), user, slot)
+    let system = sim.systemPrompt(slot, selection)
+    let request = client.requestFor(system, user, slot)
+    let identity = $sim.roundOf() & "-" & $slot & "-" & $attempt
+    client.attemptIds[slot].add(identity)
+    let destination = getEnv("FRUIT_MARKET_ATTEMPT_TRACE_DIR")
+    if destination.len > 0:
+      let model = if client.transport == ltBedrock: client.bedrockModels[client.bedrockModel] else: client.model
+      writePrivate(destination / (identity & ".jsonl"), $(%*{
+        "event_type": "attempt_started", "attempt_id": identity, "visibility": "private",
+        "source_revision": getEnv("FRUIT_MARKET_SOURCE_REVISION"),
+        "seat": slot, "round": sim.roundOf(), "retry": attempt,
+        "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "prompt_template": selection.promptMetadata(system, user),
+        "request": {"transport": $client.transport, "model": model, "body": parseJson(request.body)}}) & "\n")
     result.post(request.url, request.headers, request.body, $slot)
 
 proc decideAll*(
@@ -669,10 +695,14 @@ proc decideAll*(
   sim: Sim,
   prompts: array[Seats, string],
   scripted: array[Seats, ScriptKind],
-  connected: array[Seats, bool]
+  connected: array[Seats, bool],
+  selection: PromptSelection
 ): array[Seats, Order] =
   ## One standing order per seat. NEVER raises: any failure falls back to the
   ## `hauler` order so the episode always advances.
+  client.attemptIds = default(array[Seats, seq[string]])
+  client.selectedAttemptIds = default(array[Seats, string])
+  let destination = getEnv("FRUIT_MARKET_ATTEMPT_TRACE_DIR")
   var open: seq[int]
   for slot in 0 ..< Seats:
     let kind = scripted[slot]
@@ -686,24 +716,42 @@ proc decideAll*(
     if open.len == 0 or client.disabled:
       break
     let started = epochTime()
-    var batch = client.buildBatch(sim, prompts, open, attempt)
+    var batch = client.buildBatch(sim, prompts, open, attempt, selection)
     ## ONE parallel batch for the whole round — this is a simultaneous-decision
     ## game and a sequential sweep would blow the play budget.
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     let latency = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, slot in open:
+      var text, failure: string
+      var parsed, normalized = newJNull()
+      var selected = false
       try:
-        let text = client.textOf(responses[position].response,
+        text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        var order = parseOrder(extractJsonObject(text), sim, slot)
+        parsed = extractJsonObject(text)
+        var order = parseOrder(parsed, sim, slot)
+        normalized = orderJson(order)
         order.source = if attempt == 0: osLlm else: osRetry
         order.latencyMs = latency
         result[slot] = order
+        selected = true
+        client.selectedAttemptIds[slot] = client.attemptIds[slot][^1]
       except CatchableError as error:
+        failure = error.msg
         echo "fruit-market llm: seat ", slot, " attempt ", attempt,
           " failed: ", cleanText(error.msg, MaxErrorLen)
         stillOpen.add(slot)
+      finally:
+        if destination.len > 0:
+          let identity = client.attemptIds[slot][^1]
+          appendPrivate(destination / (identity & ".jsonl"), %*{
+            "event_type": "attempt_finished", "attempt_id": identity,
+            "raw_response": responses[position].response.body, "response": text,
+            "failure": failure, "parsed_action": parsed, "normalized_action": normalized,
+            "selected": selected, "latency_ms": latency,
+            "http_status": responses[position].response.code, "transport_error": responses[position].error,
+            "platform_call_id": newJNull(), "behavior_logprobs": newJNull()})
     open = stillOpen
 
   for slot in open:

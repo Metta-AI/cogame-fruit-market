@@ -9,7 +9,7 @@ import std/[json, net, os, strutils, times, unittest]
 
 import curly
 
-import fruit_market/sim, fruit_market/scripted, fruit_market/llm
+import fruit_market/prompts, fruit_market/sim, fruit_market/scripted, fruit_market/llm
 
 type StubMode = enum
   smJunk        ## 200 with prose and no JSON object
@@ -205,7 +205,7 @@ suite "degrade, never hang":
       prompts[slot] = "trade well"
       scripts[slot] = skNone
       connected[slot] = true
-    let orders = client.decideAll(game, prompts, scripts, connected)
+    let orders = client.decideAll(game, prompts, scripts, connected, PromptSelection())
     for slot in 0 ..< Seats:
       check orders[slot].job in {jHarvest, jMarket, jTrek, jRest}
       check orders[slot] == scriptedOrder(game, slot, skHauler)
@@ -221,7 +221,7 @@ suite "degrade, never hang":
     for slot in 0 ..< Seats:
       scripts[slot] = skNone
       connected[slot] = slot != 3
-    let orders = client.decideAll(game, prompts, scripts, connected)
+    let orders = client.decideAll(game, prompts, scripts, connected, PromptSelection())
     check orders[3] == scriptedOrder(game, 3, skHauler)
 
   test "a scripted registration is honoured without a request":
@@ -235,7 +235,7 @@ suite "degrade, never hang":
     for slot in 0 ..< Seats:
       connected[slot] = true
       scripts[slot] = if slot < 4: skHauler else: skHomesteader
-    let orders = client.decideAll(game, prompts, scripts, connected)
+    let orders = client.decideAll(game, prompts, scripts, connected, PromptSelection())
     for slot in 0 ..< Seats:
       let want = if slot < 4: skHauler else: skHomesteader
       check orders[slot] == scriptedOrder(game, slot, want)
@@ -257,7 +257,7 @@ suite "a stubbed transport degrades to the scripted order":
       prompts[slot] = "trade well"
       scripts[slot] = if slot < openSeats: skNone else: skHauler
       connected[slot] = true
-    client.decideAll(game, prompts, scripts, connected)
+    client.decideAll(game, prompts, scripts, connected, PromptSelection())
 
   test "junk with no JSON object falls back and is recorded as fallback":
     let game = bench()
@@ -279,7 +279,7 @@ suite "a stubbed transport degrades to the scripted order":
     for slot in 0 ..< Seats:
       scripts[slot] = skNone
       connected[slot] = true
-    let orders = client.decideAll(game, prompts, scripts, connected)
+    let orders = client.decideAll(game, prompts, scripts, connected, PromptSelection())
     for slot in 0 ..< Seats:
       check orders[slot].source == osFallback
     ## 429 is a throttle, not an auth failure: the seat is retried next round.
@@ -295,7 +295,7 @@ suite "a stubbed transport degrades to the scripted order":
     for slot in 0 ..< Seats:
       scripts[slot] = skNone
       connected[slot] = true
-    let orders = client.decideAll(game, prompts, scripts, connected)
+    let orders = client.decideAll(game, prompts, scripts, connected, PromptSelection())
     for slot in 0 ..< Seats:
       check orders[slot].source == osFallback
     check client.disabled
@@ -323,7 +323,7 @@ suite "the batch and the pacing floor":
       open.add(slot)
     startStub(smJunk)
     let client = stubClient()
-    let batch = client.buildBatch(game, prompts, open, 0)
+    let batch = client.buildBatch(game, prompts, open, 0, PromptSelection())
     check batch.len == open.len
     check batch.len == Seats
     var tags: seq[string]
@@ -333,7 +333,7 @@ suite "the batch and the pacing floor":
     for slot in 0 ..< Seats:
       check $slot in tags
     ## The retry batch carries the hint, and only the seats still open.
-    let retry = client.buildBatch(game, prompts, @[3], 1)
+    let retry = client.buildBatch(game, prompts, @[3], 1, PromptSelection())
     check retry.len == 1
     check "previous reply was invalid" in retry[0].body
 
@@ -374,7 +374,7 @@ suite "the batch and the pacing floor":
 suite "prompts":
   test "the system prompt states the output contract and the mirror rule twice":
     let game = bench()
-    let system = game.systemPrompt(0)
+    let system = game.systemPrompt(0, PromptSelection())
     check "reply with ONLY one JSON object" in system
     check "begin with the character {" in system
     check "EXACT MIRROR" in system

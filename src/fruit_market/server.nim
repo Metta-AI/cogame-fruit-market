@@ -16,7 +16,7 @@ import
 
 import
   ./sim_types, ./sim_config, ./board, ./events, ./sim_state, ./sim,
-  ./scripted, ./llm, ./replays, ./broadcast, ./global, ./wire_constants
+  ./scripted, ./llm, ./prompts, ./replays, ./broadcast, ./global, ./wire_constants, ./evidence
 
 const
   MaxPromptLen = 4000
@@ -32,6 +32,8 @@ const
 type
   GameState = object
     config: GameConfig
+    tracePath: string
+    selection: PromptSelection
     sim: Sim
     prompts: array[Seats, string]
     scripted: array[Seats, ScriptKind]
@@ -131,6 +133,8 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.finished = true
     grace = state.config.shutdownGraceSeconds
     results = state.sim.resultsJson()
+    if state.tracePath.len > 0:
+      appendPrivate(state.tracePath, %*{"event_type": "host_finished", "results": results})
     replayData = $replayJson(state.sim, results)
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists.
@@ -262,7 +266,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (one parallel batch of eight) runs OUTSIDE the lock on a
       ## snapshot; only this thread mutates the sim, so it cannot go stale.
-      var orders = client.decideAll(simCopy, prompts, scripts, connected)
+      var orders = client.decideAll(simCopy, prompts, scripts, connected, state.selection)
       let orderDeadline = lastBatchStart +
         2.0 * config.llmTimeoutSeconds.float + 2.0
       while epochTime() < orderDeadline:
@@ -284,8 +288,37 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             else:
               orders[slot] = scriptedOrder(state.sim, slot, skHauler)
               orders[slot].source = osFallback
+        let eventStart = state.sim.events.len
+        let startTick = state.sim.tick
         state.sim.setRoundOrders(orders)
-        state.sim.runRound()
+        let actions = state.sim.runRound()
+        if state.tracePath.len > 0:
+          for seat in 0 ..< Seats:
+            let system = systemPrompt(simCopy, seat, state.selection)
+            let user = userPrompt(simCopy, seat, prompts[seat])
+            let installed = orderJson(state.sim.cogs[seat].order)
+            let modelAccepted = not external[seat] and orders[seat].source in {osLlm, osRetry} and
+              client.selectedAttemptIds[seat].len > 0
+            appendPrivate(state.tracePath, %*{
+              "event_type": "host_decision", "visibility": "private",
+              "seat": seat, "round": simCopy.roundOf(),
+              "observation": simCopy.observationJson(seat),
+              "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+              "prompt_template": state.selection.promptMetadata(system, user),
+              "proposal": orderJson(orders[seat]), "executed_action": installed,
+              "source": $orders[seat].source, "external": external[seat],
+              "attempt_ids": client.attemptIds[seat],
+              "selected_attempt_id": (if modelAccepted: %client.selectedAttemptIds[seat] else: newJNull()),
+              "order_event": state.sim.events[eventStart + seat].jsonRow(),
+              "terminal": state.sim.done and seat == Seats - 1})
+          var frames, events = newJArray()
+          for tick in startTick ..< state.sim.tick: frames.add(%state.sim.frames[tick])
+          for index in eventStart ..< state.sim.events.len: events.add(state.sim.events[index].jsonRow())
+          appendPrivate(state.tracePath, %*{
+            "event_type": "host_round", "visibility": "private", "round": simCopy.roundOf(),
+            "start_tick": startTick, "end_tick": state.sim.tick,
+            "event_start": eventStart, "event_end": state.sim.events.len, "events": events,
+            "kernel_actions": kernelActionsJson(actions), "frames": frames, "terminal": state.sim.done})
         for slot in 0 ..< Seats:
           state.orderReceived[slot] = false
         echo "fruit-market: round ", state.sim.roundsPlayed, " of ",
@@ -470,8 +503,14 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   var policyNames: seq[string]
   for player in config.players:
     policyNames.add(player.name)
+  state.selection = promptSelection(parseJson(runtimeConfig.config))
   state.config = config
   state.sim = initSim(config, policyNames)
+  state.tracePath = getEnv("FRUIT_MARKET_HOST_TRACE_PATH")
+  if state.tracePath.len > 0:
+    writePrivate(state.tracePath, $(%*{"event_type": "host_started", "visibility": "private",
+      "source_revision": getEnv("FRUIT_MARKET_SOURCE_REVISION"), "seed": config.seed,
+      "prompt_selection": state.selection.selectionMetadata()}) & "\n")
   for slot in 0 ..< Seats:
     state.scripted[slot] = skNone
   let router = buildRouter()

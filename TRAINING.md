@@ -1,39 +1,71 @@
-# Metta post-training data
+# Prompt diversity and candidate trajectories
 
-The native simulator and published `hauler` policy export supervised examples
-for all four certified Fruit Market variants:
+The native host, language bridge, and teacher exporter share five training
+introductions and two held-out introductions. Canonical wording preserves the
+original messages. Shared rules, private farmer types, action schema, simulator
+randomness, simultaneous orders, and published budgets remain unchanged.
 
-```sh
-nimby sync nimby.lock
-for variant in open-market concentric-rivers deep-rivers lean-harvest; do
-  nim r -d:release --path:src tools/export_posttrain.nim \
-    "/tmp/fruit-${variant}" 10 1 "$variant"
-done
-```
+Set game configuration `promptVariant` to `canonical` (default), `plain`,
+`numbered`, `questions`, `reordered`, or `mixed`. Mixed selection requires a
+nonnegative `promptSeed`; `promptSeed % 5` chooses a training introduction.
+Selection remains fixed throughout the episode. `heldout-briefing` and
+`heldout-reference` are evaluation-only; the bridge rejects them for `split:
+"train"`, and the teacher exporter rejects them.
 
-Each run reads the variant configuration from the Coworld manifest, adds the
-per-seat tokens supplied by the hosted platform, and plays complete seeded
-games. The exporter freezes the game state at each simultaneous round, then
-records each seat's hosted system and user prompts and a `hauler` order
-accepted by the game's reply parser. Parsed orders drive the simulator. Whole
-games stay in one split. The manifest records source revision, variant,
-scores, rounds, and row counts. Existing output directories are never
-overwritten.
-
-Train an output with Metta post-training:
+## Complete language actions
 
 ```sh
-nix develop -c uv run --package metta-posttrain --extra train \
-  python -m metta_posttrain.train --dataset /tmp/fruit-open-market \
-  --output /tmp/fruit-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
+nim c -d:release --path:src -o:/tmp/fruit-market-bridge tools/train_bridge.nim
+/tmp/fruit-market-bridge coworld_manifest_template.json open-market text
 ```
 
-Ten complete games per variant yielded 3,840 examples. Every example fit the
-Qwen2.5-0.5B-Instruct tokenizer in 4,096 tokens; the maximum was 1,986. One
-CPU optimizer step per variant with a local tiny model verifies the Metta
-post-training path. These examples distill the scripted teacher; they do not
-establish stronger league play.
+The optional `text` argument enables the complete native order schema, including
+spectator speech, private player notes, and omitted/null offers. All eight
+orders are collected before installation. The bridge returns the parsed order,
+including quantity clamping, so collection records what the engine accepted.
+Private observations include wording identity and SHA-256 hashes of rendered
+system/user messages. Spectator speech never reaches another player's prompt.
+
+## Reviewed candidate export
+
+From a clean, committed checkout:
+
+```sh
+nim c -d:release --path:src -o:/tmp/fruit-market-export tools/export_posttrain.nim
+/tmp/fruit-market-export /tmp/fruit-candidates 10 1 open-market plain 0
+```
+
+Other published variants are `concentric-rivers`, `deep-rivers`, and
+`lean-harvest`. Omit the last two arguments for canonical wording. The exporter
+streams private `trajectories.jsonl`, `execution.jsonl`, and `manifest.json`.
+Each complete game contains exact prompts, `hauler` proposals, parsed orders,
+actual kernel actions, replay frames/events, outcomes, and source revision.
+
+These are candidates, not approved training labels. The shared Coworld
+importer owns independent review and dataset splitting. Keep each
+`fruit-market-SEED` family together across variants and wordings.
+
+## Native evidence and evaluation
+
+Set `FRUIT_MARKET_HOST_TRACE_PATH`, `FRUIT_MARKET_ATTEMPT_TRACE_DIR`, and
+`FRUIT_MARKET_SOURCE_REVISION` to retain private native evidence. Attempt files
+record actual request bodies, model identity, responses, failures, parsing,
+and retry selection. Host records join installed orders with tick execution.
+These artifacts are separate from spectator replay data. Authentication
+headers are not recorded.
+
+Run complete workflow checks with `tools/test_prompt_games.py BRIDGE
+ORIGINAL_BRIDGE`, `tools/test_export_posttrain.py EXPORTER`, and
+`tools/test_native_prompts.py GAME PLAYER OUTPUT`. The native panel retains
+published budgets and pacing. It uses a reserved closed inference endpoint
+and real host/player processes to verify failed requests and fallback paths.
+`--smoke` selects two canonical native cases.
+
+For learning comparisons, match game seeds, seats, opponents, and inference
+settings between canonical and mixed training. Report win rate, invalid-order
+rate, fallback rate, request counts, and completion rate for familiar and
+held-out wording. Deterministic checks do not establish learning stability or
+successful provider inference.
 
 # Numeric reinforcement learning
 

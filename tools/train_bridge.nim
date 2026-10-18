@@ -2,7 +2,7 @@
 ## nim c -d:release --path:src -o:fruit-market-train-bridge tools/train_bridge.nim
 
 import std/[json, os]
-import fruit_market/[sim_types, sim_config, sim_state, scripted, sim, llm]
+import fruit_market/[sim_types, sim_config, sim_state, scripted, sim, llm, prompts]
 
 const OperatorPrompt = "Maximize your own score by farming, trading, and eating fruit you crave."
 
@@ -28,15 +28,19 @@ proc appendOffer(values: var JsonNode, offer: JsonNode) =
     values.add(offer["want"]["n"])
     values.add(%(if offer["unfunded"].getBool(): 1 else: 0))
 
-proc decision(game: Sim, seat, id: int): JsonNode =
-  %*{
+proc decision(game: Sim, seat, id: int, selection: PromptSelection, textMode: bool): JsonNode =
+  let system = game.systemPrompt(seat, selection)
+  let user = game.userPrompt(seat, OperatorPrompt)
+  let view = game.observationJson(seat)
+  view["prompt_template"] = selection.promptMetadata(system, user)
+  result = %*{
     "kind": "decision", "game": "fruit-market", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": game.roundOf(),
-    "semantic_view": game.observationJson(seat),
+    "semantic_view": view,
     "inbox": [],
     "messages": [
-      {"role": "system", "content": game.systemPrompt(seat)},
-      {"role": "user", "content": game.userPrompt(seat, OperatorPrompt)}
+      {"role": "system", "content": system},
+      {"role": "user", "content": user}
     ],
     "speech_messages": [],
     "action_schema": {"type": "object",
@@ -57,6 +61,16 @@ proc decision(game: Sim, seat, id: int): JsonNode =
       }},
     "typed_question": newJNull()
   }
+
+  if textMode:
+    result["action_schema"] = %*{"type": "object", "required": ["job"],
+      "properties": {
+        "job": {"type": "string", "enum": ["harvest", "market", "trek", "rest"]},
+        "fruit": {"type": "string", "enum": ["apple", "banana"]},
+        "stall": {"type": "string", "enum": ["north", "east", "south", "west"]},
+        "eat": {"type": "string", "enum": ["crave", "any", "none"]},
+        "offer": {"type": ["object", "null"]},
+        "say": {"type": "string"}, "notes": {"type": "string"}}}
 
 proc encoding(game: Sim, seat, id: int): JsonNode =
   let view = game.observationJson(seat)
@@ -133,15 +147,18 @@ proc encoding(game: Sim, seat, id: int): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
-    quit("usage: fruit-market-train-bridge MANIFEST [variant]", 1)
-  let variant = if args.len == 2: args[1] else: "open-market"
+  if args.len notin 1 .. 3:
+    quit("usage: fruit-market-train-bridge MANIFEST [variant] [text]", 1)
+  let textMode = args.len == 3
+  if textMode: doAssert args[2] == "text"
+  let variant = if args.len >= 2: args[1] else: "open-market"
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
     if entry["id"].getStr() == variant:
       variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil, "unknown variant: " & variant
+  var selection: PromptSelection
   var game: Sim
   var orders: array[Seats, Order]
   var seat = 0
@@ -151,6 +168,10 @@ when isMainModule:
     var response: JsonNode
     case request["kind"].getStr()
     of "reset":
+      selection = promptSelection(request)
+      if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference} and
+          request.hasKey("split") and request["split"].getStr() == "train":
+        raise newException(ValueError, "held-out wording cannot be used for training")
       doAssert request["players"].getInt() == Seats
       var config = defaultGameConfig()
       let runtimeConfig = copy(variantConfig)
@@ -163,7 +184,7 @@ when isMainModule:
       game = initSim(config)
       seat = 0
       id = 0
-      response = game.decision(seat, id)
+      response = game.decision(seat, id, selection, textMode)
     of "encode":
       doAssert not game.done
       response = game.encoding(seat, id)
@@ -180,20 +201,22 @@ when isMainModule:
         "eat": $order.eat,
         "offer": offer
       }
-      response = %*{"response": $action}
+      response = %*{"response": $(if textMode: orderJson(order) else: action)}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
       let action = parseJson(request["response"].getStr())
-      var payload = %*{"job": action["job"], "eat": action["eat"]}
-      for field in ["fruit", "stall"]:
-        if action[field].getStr() != "default":
-          payload[field] = action[field]
-      if action["offer"].kind == JObject:
-        payload["offer"] = action["offer"]
-      elif action["offer"].getStr() == "withdraw":
-        payload["offer"] = newJNull()
-      else:
-        doAssert action["offer"].getStr() == "keep"
+      var payload = action
+      if not textMode:
+        payload = %*{"job": action["job"], "eat": action["eat"]}
+        for field in ["fruit", "stall"]:
+          if action[field].getStr() != "default":
+            payload[field] = action[field]
+        if action["offer"].kind == JObject:
+          payload["offer"] = action["offer"]
+        elif action["offer"].getStr() == "withdraw":
+          payload["offer"] = newJNull()
+        else:
+          doAssert action["offer"].getStr() == "keep"
       orders[seat] = parseOrder(payload, game, seat)
       inc id
       var observation: JsonNode
@@ -208,11 +231,11 @@ when isMainModule:
           observation = %*{"kind": "terminal", "scores": scores}
         else:
           seat = 0
-          observation = game.decision(seat, id)
+          observation = game.decision(seat, id, selection, textMode)
       else:
         inc seat
-        observation = game.decision(seat, id)
-      response = %*{"kind": "accepted", "action": action,
+        observation = game.decision(seat, id, selection, textMode)
+      response = %*{"kind": "accepted", "action": (if textMode: orderJson(orders[request["decision_id"].getInt() mod Seats]) else: action),
         "observation": observation}
     else:
       raise newException(ValueError, "unknown command: " & request["kind"].getStr())
