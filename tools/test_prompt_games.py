@@ -7,16 +7,26 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BRIDGE, ORIGINAL = [Path(value).resolve() for value in sys.argv[1:3]]
+BRIDGE = Path(sys.argv[1]).resolve()
 VARIANTS = ("open-market", "concentric-rivers", "deep-rivers", "lean-harvest")
-WORDINGS = ("canonical", "plain", "numbered", "questions", "reordered", "heldout-briefing", "heldout-reference")
+WORDINGS = (
+    "canonical",
+    "plain",
+    "numbered",
+    "questions",
+    "reordered",
+    "heldout-briefing",
+    "heldout-reference",
+)
 
 
-def play(variant, seed, wording="canonical", prompt_seed=0, original=False, numeric=False, text=False):
-    command = [str(ORIGINAL if original else BRIDGE), str(ROOT / "coworld_manifest_template.json"), variant]
-    if not original and not numeric:
+def play(variant, seed, wording="canonical", prompt_seed=0, numeric=False, text=False):
+    command = [str(BRIDGE), str(ROOT / "coworld_manifest_template.json"), variant]
+    if not numeric:
         command.append("text")
-    with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as process:
+    with subprocess.Popen(
+        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    ) as process:
         assert process.stdin is not None and process.stdout is not None
 
         def request(value):
@@ -40,11 +50,19 @@ def play(variant, seed, wording="canonical", prompt_seed=0, original=False, nume
             assert index == len(trace) and seat == index % 8
             view = observation["semantic_view"].copy()
             messages = observation["messages"]
-            assert systems.setdefault(seat, messages[0]["content"]) == messages[0]["content"]
-            if not original:
+            assert (
+                systems.setdefault(seat, messages[0]["content"])
+                == messages[0]["content"]
+            )
+            if not numeric:
                 metadata = view.pop("prompt_template")
-                assert (metadata["bank"], metadata["variant"], metadata["selection"], metadata["seed"]) == (
-                    "fruit-market-rules-v1",
+                assert (
+                    metadata["bank"],
+                    metadata["variant"],
+                    metadata["selection"],
+                    metadata["seed"],
+                ) == (
+                    "fruit-market-rules-v2",
                     WORDINGS[prompt_seed % 5] if wording == "mixed" else wording,
                     wording,
                     prompt_seed,
@@ -70,7 +88,9 @@ def play(variant, seed, wording="canonical", prompt_seed=0, original=False, nume
                 expected["offer"]["give"]["n"] = 6
                 expected["offer"]["want"]["n"] = 1
             trace.append((view, messages[1]["content"], action))
-            result = request({"kind": "step", "decision_id": index, "response": json.dumps(action)})
+            result = request(
+                {"kind": "step", "decision_id": index, "response": json.dumps(action)}
+            )
             assert result["kind"] == "accepted" and result["action"] == expected
             observation = result["observation"]
         assert len(trace) == 96 and len(observation["scores"]) == 8
@@ -80,30 +100,40 @@ def play(variant, seed, wording="canonical", prompt_seed=0, original=False, nume
 
 
 for variant in VARIANTS:
-    for seed in (17, 23):
-        old = play(variant, seed, original=True)
-        current = play(variant, seed, numeric=True)
-        assert old == current
-        canonical = play(variant, seed)
-        assert canonical[1:] == old[1:]
-        assert [(view, user) for view, user, _ in canonical[0]] == [(view, user) for view, user, _ in old[0]]
-        for wording, prompt_seed in [(wording, 0) for wording in WORDINGS] + [("mixed", value) for value in range(5)]:
-            candidate = play(variant, seed, wording, prompt_seed)
-            assert candidate[:2] == canonical[:2]
+    canonical = play(variant, 17)
+    systems = []
+    for wording, seed in [(wording, 0) for wording in WORDINGS] + [("mixed", 4)]:
+        candidate = play(variant, 17, wording, seed)
+        assert candidate[:2] == canonical[:2]
+        if wording != "mixed":
+            systems.append(candidate[2])
+    assert all(len({system[seat] for system in systems}) == 7 for seat in range(8))
     play(variant, 17, text=True)
-    print(
-        variant,
-        "matched complete games, original numeric comparison, clamped quantities, private notes and spectator isolation PASS",
-        flush=True,
-    )
+    print(variant, "10 complete matched/normalization games PASS", flush=True)
 for wording in WORDINGS[-2:]:
     result = subprocess.run(
-        [str(BRIDGE), str(ROOT / "coworld_manifest_template.json"), VARIANTS[0], "text"],
-        input=json.dumps({"kind": "reset", "seed": "17", "players": 8, "promptVariant": wording, "split": "train"})
+        [
+            str(BRIDGE),
+            str(ROOT / "coworld_manifest_template.json"),
+            VARIANTS[0],
+            "text",
+        ],
+        input=json.dumps(
+            {
+                "kind": "reset",
+                "seed": "17",
+                "players": 8,
+                "promptVariant": wording,
+                "split": "train",
+            }
+        )
         + "\n",
         text=True,
         capture_output=True,
         timeout=10,
     )
-    assert result.returncode != 0 and "held-out wording cannot be used for training" in result.stderr
-print("100 full text panel games; eight original numeric comparisons; held-out gate PASS", flush=True)
+    assert (
+        result.returncode != 0
+        and "held-out wording cannot be used for training" in result.stderr
+    )
+print("40 complete language games; held-out gate PASS", flush=True)

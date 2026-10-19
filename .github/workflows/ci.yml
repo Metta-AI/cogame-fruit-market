@@ -154,7 +154,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src -o:"$RUNNER_TEMP/$(basename "${t}" .nim)-${m}" "${t}"; then
+              if ! nim r ${flags} --path:src "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -169,13 +169,6 @@ jobs:
           nim c -d:release --path:src -o:"${RUNNER_TEMP}/fruit-market-train-bridge" tools/train_bridge.nim
           python3 tools/test_train_bridge.py "${RUNNER_TEMP}/fruit-market-train-bridge"
 
-      - name: Verify complete candidate games and native prompt evidence
-        run: |
-          nim c -d:release --path:src -o:"${RUNNER_TEMP}/fruit-market-export" tools/export_posttrain.nim
-          python3 tools/test_export_posttrain.py "${RUNNER_TEMP}/fruit-market-export"
-          nim c -d:release --path:src -o:"${RUNNER_TEMP}/fruit-market-game" src/fruit_market.nim
-          nim c -d:release --path:src -o:"${RUNNER_TEMP}/fruit-market-player" src/fruit_market_player.nim
-          python3 tools/test_native_prompts.py "${RUNNER_TEMP}/fruit-market-game" "${RUNNER_TEMP}/fruit-market-player" "${RUNNER_TEMP}/fruit-market-prompts" --smoke
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

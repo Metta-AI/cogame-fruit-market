@@ -263,7 +263,7 @@ proc recordFrame*(sim: var Sim) =
 
 # --- the tick ---------------------------------------------------------------
 
-proc stepTick*(sim: var Sim): array[Seats, Action] {.discardable.} =
+proc stepTick*(sim: var Sim) =
   ## One tick, the nine numbered steps in order. Within a step, seats resolve
   ## in ascending slot order unless the step names another order.
   for slot in 0 ..< Seats:
@@ -272,7 +272,6 @@ proc stepTick*(sim: var Sim): array[Seats, Action] {.discardable.} =
   var actions: array[Seats, Action]
   for slot in 0 ..< Seats:
     actions[slot] = sim.kernelAction(slot)           # 2
-  result = actions
   sim.stepHarvest(actions)                           # 3
   sim.stepMove(actions)                              # 4
   sim.stepOfferBook()                                # 5
@@ -377,13 +376,13 @@ proc forfeit*(sim: var Sim) =
     sim.recordFrame()
   sim.finish("forfeit", "forfeit")
 
-proc runRound*(sim: var Sim): seq[array[Seats, Action]] {.discardable.} =
+proc runRound*(sim: var Sim) =
   ## Steps one whole round and closes it. The caller supplies the standing
   ## orders before calling.
   if sim.done:
     return
   for _ in 0 ..< sim.config.ticksPerRound:
-    result.add(sim.stepTick())
+    sim.stepTick()
   sim.closeRound()
   if sim.famineReached() and not sim.famineLatched:
     sim.famineLatched = true

@@ -19,7 +19,7 @@ import
   std/[json, os, strutils, times],
   bitworld/runtime,
   curly,
-  ./sim_types, ./sim_config, ./board, ./sim_state, ./sim, ./scripted, ./prompts, ./evidence
+  ./sim_types, ./sim_config, ./board, ./sim_state, ./sim, ./scripted, ./prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -35,8 +35,6 @@ type
     ltNone, ltSidecar, ltBedrock, ltAnthropic
 
   LlmClient* = ref object
-    attemptIds*: array[Seats, seq[string]]
-    selectedAttemptIds*: array[Seats, string]
     curl: Curly
     transport: LlmTransport
     apiKey: string
@@ -361,9 +359,11 @@ ring and TWO rivers from the other grove.
   rest    - stand still and let stamina regenerate
 
 """)
-  result.add("""TRADING: an offer is "I give X of one fruit, I want Y of the
+  case selection.selectedVariant
+  of pvCanonical:
+    result.add("""TRADING: an offer is "I give X of one fruit, I want Y of the
 other". An offer clears ONLY against its EXACT MIRROR held by a cog within """ &
-    $sim.config.tradeRadius & """ cells: their give must be your want, with the
+      $sim.config.tradeRadius & """ cells: their give must be your want, with the
 SAME two numbers, swapped. For example, if a cog near you offers *give 2
 bananas, want 3 apples*, the only offer of yours that can clear with it is
 *give 3 apples, want 2 bananas*. Nothing else clears, ever — not a better
@@ -372,7 +372,7 @@ executed offer is consumed. An offer you cannot cover from your inventory is
 `unfunded`: everyone sees it and it never clears.
 
 """)
-  result.add("""SCORING: 5 points per craved fruit you eat, 1 point per own
+    result.add("""SCORING: 5 points per craved fruit you eat, 1 point per own
 fruit you eat; higher is better. Nothing else scores — not trades, not volume,
 not harvests.
 
@@ -384,6 +384,64 @@ are the only meeting protocol there is. Your `notes` are private to you and are
 handed back to you next round.
 
 """)
+  of pvPlain:
+    result.add("TRADING: An offer names the fruit and quantity you give and the fruit and quantity you want. " &
+      "It clears only with its exact mirror within " & $sim.config.tradeRadius & " cells: both fruits and both quantities must swap. Giving 2 bananas for 3 apples therefore " &
+      "requires a partner giving 3 apples for 2 bananas. A different price or larger quantity does " &
+      "not match. Each cog can trade once per round; a successful offer is consumed. An offer without " &
+      "enough inventory is publicly visible as `unfunded` and cannot clear.\n\nSCORING AND " &
+      "COMMUNICATION: Only eating scores: " & $sim.config.craveScore & " points per craved fruit and " & $sim.config.ownScore & " per own fruit; more points is better. Trading, harvesting, and volume earn no points " &
+      "themselves. All eight cogs choose simultaneously from the same kinds of information. Other " &
+      "cogs cannot hear `say`; it goes only to spectators. Communicate through posted offers and your " &
+      "location, using the four stalls to meet. Private `notes` return to you next round.\n\n")
+  of pvNumbered:
+    result.add("TRADING: 1. Post the fruit and quantity you give and the fruit and quantity you want.\n2. Find " &
+      "an exact mirror within " & $sim.config.tradeRadius & " cells: the fruits and quantities swap. Give 2 bananas/want 3 apples matches only give 3 " &
+      "apples/want 2 bananas; better prices and bigger quantities do not count.\n3. Fund your offer " &
+      "from inventory. Unfunded offers stay visible but cannot execute.\n4. Execute at most one trade " &
+      "per cog per round. Execution consumes the offer.\n\nSCORING AND COMMUNICATION: 1. Score only by " &
+      "eating: craved fruit " & $sim.config.craveScore & ", own fruit " & $sim.config.ownScore & "; maximize points. Trades, volume, and harvests score nothing.\n2. Eight policies decide " &
+      "simultaneously with the same kinds of information.\n3. Signal through posted offers and where " &
+      "you stand; the four stalls are your meeting protocol.\n4. `say` reaches spectators only, never " &
+      "other cogs. `notes` remain private and return next round.\n\n")
+  of pvQuestions:
+    result.add("TRADING: When does an offer clear? When a cog within " & $sim.config.tradeRadius & " cells holds its exact mirror: swapped fruits and identical swapped quantities. What mirrors " &
+      "give 2 bananas/want 3 apples? Give 3 apples/want 2 bananas, and nothing else. Can a better " &
+      "price or bigger quantity clear? No. What if you lack inventory? Your visible offer is " &
+      "`unfunded` and never clears. How often can you trade? Once per cog per round; the executed " &
+      "offer is consumed.\n\nSCORING AND COMMUNICATION: What scores? Eating craved fruit earns " & $sim.config.craveScore & ", eating own fruit earns " & $sim.config.ownScore & "; higher is better. Do trades, volume, or harvests score? No. Who decides now? All eight " &
+      "policies simultaneously, with the same kinds of information. Can anyone hear `say`? Only " &
+      "spectators. How do cogs coordinate? Posted offers and location, with four named stalls as the " &
+      "meeting protocol. Where do `notes` go? Privately back to you next round.\n\n")
+  of pvReordered:
+    result.add("TRADING: Each cog may execute only one trade per round, consuming its offer. Unfunded offers " &
+      "are visible but cannot clear. A funded offer must meet its exact mirror within " & $sim.config.tradeRadius & " cells: their give equals your want and their want equals your give, including both " &
+      "quantities. Thus give 2 bananas/want 3 apples pairs only with give 3 apples/want 2 bananas. " &
+      "Neither a better price nor a larger amount substitutes for that match.\n\nSCORING AND " &
+      "COMMUNICATION: Your private `notes` return next round; your `say` is spectator-only and " &
+      "unheard by cogs. Coordinate only through posted offers and position, meeting at the four " &
+      "stalls. The other seven policies choose simultaneously with the same kinds of information. " &
+      "Maximize points from eating: " & $sim.config.craveScore & " for craved fruit, " & $sim.config.ownScore & " for own fruit. Trades, trading volume, and harvesting contribute no points.\n\n")
+  of pvHeldoutBriefing:
+    result.add("TRADING: Before posting, check your inventory and a nearby counteroffer. Trading requires an " &
+      "exact mirror within " & $sim.config.tradeRadius & " cells: the offered and requested fruits and quantities must reverse. For give 2 bananas/want " &
+      "3 apples, only give 3 apples/want 2 bananas qualifies, regardless of better prices or larger " &
+      "amounts. An inventory-short offer remains visible as `unfunded` and cannot clear. A cog trades " &
+      "at most once in a round, and execution consumes its offer.\n\nSCORING AND COMMUNICATION: Pursue " &
+      "eating points: " & $sim.config.craveScore & " for each craved fruit and " & $sim.config.ownScore & " for each own fruit; higher wins. Harvests, volume, and trades do not score. You and seven " &
+      "others decide simultaneously from the same kinds of information. Coordination is nonverbal: " &
+      "offers and positions, with four stalls for meetings. `say` is exclusively for spectators; " &
+      "private `notes` are handed back next round.\n\n")
+  of pvHeldoutReference:
+    result.add("TRADING: Offer fields: given fruit/quantity, wanted fruit/quantity. Match: exact reversed " &
+      "fruits and quantities, distance at most " & $sim.config.tradeRadius & " cells. Example: give 2 bananas/want 3 apples ↔ give 3 apples/want 2 bananas. Better price or " &
+      "bigger quantity: not a match. Inventory shortfall: visible `unfunded` offer, no execution. " &
+      "Limit: one trade per cog per round. Executed offer: consumed.\n\nSCORING AND COMMUNICATION: " &
+      "Points: craved eaten × " & $sim.config.craveScore & " + own eaten × " & $sim.config.ownScore & "; higher is better. Trades/volume/harvests: zero points. Decisions: eight simultaneous " &
+      "policies with the same kinds of information. Cog-to-cog signals: offers and location only. " &
+      "Meeting protocol: four named stalls. `say`: spectators only. `notes`: private, returned next " &
+      "round.\n\n")
+  of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
   result.add("""OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no
 analysis, no explanation, no markdown fences, no text before or after the
 object. Your reply must begin with the character { and end with }.""")
@@ -674,20 +732,7 @@ proc buildBatch*(
     var user = sim.userPrompt(slot, prompts[slot])
     if attempt > 0:
       user.add(RetryHint)
-    let system = sim.systemPrompt(slot, selection)
-    let request = client.requestFor(system, user, slot)
-    let identity = $sim.roundOf() & "-" & $slot & "-" & $attempt
-    client.attemptIds[slot].add(identity)
-    let destination = getEnv("FRUIT_MARKET_ATTEMPT_TRACE_DIR")
-    if destination.len > 0:
-      let model = if client.transport == ltBedrock: client.bedrockModels[client.bedrockModel] else: client.model
-      writePrivate(destination / (identity & ".jsonl"), $(%*{
-        "event_type": "attempt_started", "attempt_id": identity, "visibility": "private",
-        "source_revision": getEnv("FRUIT_MARKET_SOURCE_REVISION"),
-        "seat": slot, "round": sim.roundOf(), "retry": attempt,
-        "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "prompt_template": selection.promptMetadata(system, user),
-        "request": {"transport": $client.transport, "model": model, "body": parseJson(request.body)}}) & "\n")
+    let request = client.requestFor(sim.systemPrompt(slot, selection), user, slot)
     result.post(request.url, request.headers, request.body, $slot)
 
 proc decideAll*(
@@ -700,9 +745,6 @@ proc decideAll*(
 ): array[Seats, Order] =
   ## One standing order per seat. NEVER raises: any failure falls back to the
   ## `hauler` order so the episode always advances.
-  client.attemptIds = default(array[Seats, seq[string]])
-  client.selectedAttemptIds = default(array[Seats, string])
-  let destination = getEnv("FRUIT_MARKET_ATTEMPT_TRACE_DIR")
   var open: seq[int]
   for slot in 0 ..< Seats:
     let kind = scripted[slot]
@@ -723,35 +765,17 @@ proc decideAll*(
     let latency = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, slot in open:
-      var text, failure: string
-      var parsed, normalized = newJNull()
-      var selected = false
       try:
-        text = client.textOf(responses[position].response,
+        let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        parsed = extractJsonObject(text)
-        var order = parseOrder(parsed, sim, slot)
-        normalized = orderJson(order)
+        var order = parseOrder(extractJsonObject(text), sim, slot)
         order.source = if attempt == 0: osLlm else: osRetry
         order.latencyMs = latency
         result[slot] = order
-        selected = true
-        client.selectedAttemptIds[slot] = client.attemptIds[slot][^1]
       except CatchableError as error:
-        failure = error.msg
         echo "fruit-market llm: seat ", slot, " attempt ", attempt,
           " failed: ", cleanText(error.msg, MaxErrorLen)
         stillOpen.add(slot)
-      finally:
-        if destination.len > 0:
-          let identity = client.attemptIds[slot][^1]
-          appendPrivate(destination / (identity & ".jsonl"), %*{
-            "event_type": "attempt_finished", "attempt_id": identity,
-            "raw_response": responses[position].response.body, "response": text,
-            "failure": failure, "parsed_action": parsed, "normalized_action": normalized,
-            "selected": selected, "latency_ms": latency,
-            "http_status": responses[position].response.code, "transport_error": responses[position].error,
-            "platform_call_id": newJNull(), "behavior_logprobs": newJNull()})
     open = stillOpen
 
   for slot in open:
