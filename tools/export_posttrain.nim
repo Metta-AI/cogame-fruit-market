@@ -90,7 +90,8 @@ when isMainModule:
         let system = systemPrompt(view, slot, selection)
         let user = userPrompt(view, slot, OperatorPrompt)
         rows.add($(%*{
-          "episode_id": "fruit-market-" & variant & "-" & $seed & "-" & $selection.selectedVariant,
+          "episode_id": "fruit-market-" & variant & "-" & $seed & "-" & $selection.variant & "-" &
+            $selection.selectedVariant & "-" & $selection.seed,
           "seed": "fruit-market-" & $seed,
           "prompt_template": selection.promptMetadata(system, user),
           "decision_id": view.round * Seats + slot,
