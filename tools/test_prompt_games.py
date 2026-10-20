@@ -110,7 +110,8 @@ for variant in VARIANTS:
     assert all(len({system[seat] for system in systems}) == 7 for seat in range(8))
     play(variant, 17, text=True)
     print(variant, "10 complete matched/normalization games PASS", flush=True)
-for wording in WORDINGS[-2:]:
+for wording, split in ((wording, split) for wording in WORDINGS[-2:]
+                       for split in (None, "train", "typo")):
     result = subprocess.run(
         [
             str(BRIDGE),
@@ -124,7 +125,7 @@ for wording in WORDINGS[-2:]:
                 "seed": "17",
                 "players": 8,
                 "promptVariant": wording,
-                "split": "train",
+                **({"split": split} if split is not None else {}),
             }
         )
         + "\n",
@@ -134,6 +135,6 @@ for wording in WORDINGS[-2:]:
     )
     assert (
         result.returncode != 0
-        and "held-out wording cannot be used for training" in result.stderr
+        and "held-out wording requires an explicit evaluation split" in result.stderr
     )
 print("40 complete language games; held-out gate PASS", flush=True)
