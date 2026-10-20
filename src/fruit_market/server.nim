@@ -16,7 +16,7 @@ import
 
 import
   ./sim_types, ./sim_config, ./board, ./events, ./sim_state, ./sim,
-  ./scripted, ./llm, ./replays, ./broadcast, ./global, ./wire_constants
+  ./scripted, ./llm, ./prompts, ./replays, ./broadcast, ./global, ./wire_constants
 
 const
   MaxPromptLen = 4000
@@ -32,6 +32,7 @@ const
 type
   GameState = object
     config: GameConfig
+    selection: PromptSelection
     sim: Sim
     prompts: array[Seats, string]
     scripted: array[Seats, ScriptKind]
@@ -262,7 +263,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (one parallel batch of eight) runs OUTSIDE the lock on a
       ## snapshot; only this thread mutates the sim, so it cannot go stale.
-      var orders = client.decideAll(simCopy, prompts, scripts, connected)
+      var orders = client.decideAll(simCopy, prompts, scripts, connected, state.selection)
       let orderDeadline = lastBatchStart +
         2.0 * config.llmTimeoutSeconds.float + 2.0
       while epochTime() < orderDeadline:
@@ -470,6 +471,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   var policyNames: seq[string]
   for player in config.players:
     policyNames.add(player.name)
+  state.selection = promptSelection(parseJson(runtimeConfig.config))
   state.config = config
   state.sim = initSim(config, policyNames)
   for slot in 0 ..< Seats:

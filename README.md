@@ -121,3 +121,6 @@ dead market.
 ## License
 
 MIT. See `LICENSE`.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.
