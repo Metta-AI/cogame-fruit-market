@@ -38,9 +38,13 @@ when isMainModule:
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
+    wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + games:
     var selection = configured
-    if selection.variant == pvMixed: selection.seed += seed - firstSeed
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+    inc wordingCounts[partition]
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -86,7 +90,7 @@ when isMainModule:
         let system = systemPrompt(view, slot, selection)
         let user = userPrompt(view, slot, OperatorPrompt)
         rows.add($(%*{
-          "episode_id": "fruit-market-" & variant & "-" & $seed,
+          "episode_id": "fruit-market-" & variant & "-" & $seed & "-" & $selection.selectedVariant,
           "seed": "fruit-market-" & $seed,
           "prompt_template": selection.promptMetadata(system, user),
           "decision_id": view.round * Seats + slot,

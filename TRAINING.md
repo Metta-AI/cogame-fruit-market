@@ -29,7 +29,8 @@ Spectator speech never reaches another player's prompt.
 
 Exports retain `train.jsonl`, `validation.jsonl`, and `manifest.json`, with source
 revision, complete-game outcomes, message hashes, and per-game wording selection.
-Mixed exports cycle through five training wordings. Keep each `fruit-market-SEED`
+Mixed exports cycle through five training wordings separately within each split.
+Episode IDs include wording for matched collections. Keep each `fruit-market-SEED`
 family together across board variants and wordings to prevent split leakage.
 Original arguments remain valid; omit wording and prompt seed for canonical exports.
 
