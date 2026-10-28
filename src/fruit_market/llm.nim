@@ -19,14 +19,15 @@ import
   std/[json, os, strutils, times],
   bitworld/runtime,
   curly,
-  ./sim_types, ./sim_config, ./board, ./sim_state, ./sim, ./scripted, ./prompts
+  ./sim_types, ./sim_config, ./board, ./sim_state, ./sim, ./scripted, ./prompts,
+  ./training_capture
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
   AnthropicVersion = "2023-06-01"
   BedrockAnthropicVersion = "bedrock-2023-05-31"
   TapeRows = 8
-  RetryHint = "\nYour previous reply was invalid. Respond with ONLY the " &
+  RetryHint* = "\nYour previous reply was invalid. Respond with ONLY the " &
     "requested JSON object, using one of the listed job, fruit, stall and " &
     "eat values, and offer quantities between 1 and 6."
 
@@ -741,10 +742,18 @@ proc decideAll*(
   prompts: array[Seats, string],
   scripted: array[Seats, ScriptKind],
   connected: array[Seats, bool],
-  selection: PromptSelection
+  selection: PromptSelection,
+  capture: RuntimeCapture = nil
 ): array[Seats, Order] =
   ## One standing order per seat. NEVER raises: any failure falls back to the
   ## `hauler` order so the episode always advances.
+  if capture != nil:
+    var observations: seq[JsonNode]
+    for slot in 0 ..< Seats:
+      let observation = sim.observationJson(slot)
+      observation["operator_policy"] = %prompts[slot]
+      observations.add(observation)
+    capture.beginTurn(observations)
   var open: seq[int]
   for slot in 0 ..< Seats:
     let kind = scripted[slot]
@@ -765,17 +774,34 @@ proc decideAll*(
     let latency = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, slot in open:
+      var evidence: DecisionAttempt
+      if capture != nil:
+        evidence = modelAttempt($sim.tick & "-" & $slot & "-" & $attempt,
+          sim.policyNames[slot], client.model, batch[position].body,
+          responses[position].response, responses[position].error, latency)
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        var order = parseOrder(extractJsonObject(text), sim, slot)
+        if capture != nil: evidence.response = %text
+        let proposal = extractJsonObject(text)
+        var order = parseOrder(proposal, sim, slot)
         order.source = if attempt == 0: osLlm else: osRetry
         order.latencyMs = latency
+        if capture != nil:
+          evidence.parsedAction = copy(proposal)
+          evidence.accepted = proposal == order.orderJson()
+          if not evidence.accepted:
+            evidence.rejectionReason = some("native parser normalized proposal")
         result[slot] = order
       except CatchableError as error:
+        if capture != nil: evidence.rejectionReason = some(error.msg)
         echo "fruit-market llm: seat ", slot, " attempt ", attempt,
           " failed: ", cleanText(error.msg, MaxErrorLen)
         stillOpen.add(slot)
+      if capture != nil:
+        capture.recordAttempt(slot, evidence, selection.promptMetadata(
+          evidence.request["system"].getStr(),
+          evidence.request["messages"][0]["content"].getStr()))
     open = stillOpen
 
   for slot in open:
