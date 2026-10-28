@@ -20,7 +20,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -45,6 +45,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+      # The pinned Coworld loader supports Python 3.11/3.12; runner defaults vary.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Cache nimby toolchain and nimcache
         uses: actions/cache@v4
@@ -169,7 +173,6 @@ jobs:
           nim c -d:release --path:src -o:"${RUNNER_TEMP}/fruit-market-train-bridge" tools/train_bridge.nim
           python3 tools/test_train_bridge.py "${RUNNER_TEMP}/fruit-market-train-bridge"
 
-
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
   # end to end in raw docker with the certification fixture's seat mix.
@@ -226,7 +229,8 @@ jobs:
   # container (Dockerfile.replay-viewer) because the runner has no emcc.
   # ---------------------------------------------------------------------
   wasm-viewer:
-    runs-on: ubuntu-latest
+    # Playwright 1.55 does not support Ubuntu 26.04 (the current ubuntu-latest).
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     # The bundle is EXECUTED here, not merely built, and it is executed against
     # the replay docker-smoke just produced -- hence the dependency.

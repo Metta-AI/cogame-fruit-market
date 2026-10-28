@@ -16,7 +16,8 @@ import
 
 import
   ./sim_types, ./sim_config, ./board, ./events, ./sim_state, ./sim,
-  ./scripted, ./llm, ./prompts, ./replays, ./broadcast, ./global, ./wire_constants
+  ./scripted, ./llm, ./prompts, ./replays, ./broadcast, ./global, ./wire_constants,
+  ./training_capture
 
 const
   MaxPromptLen = 4000
@@ -34,6 +35,7 @@ type
     config: GameConfig
     selection: PromptSelection
     sim: Sim
+    capture: RuntimeCapture
     prompts: array[Seats, string]
     scripted: array[Seats, ScriptKind]
     external: array[Seats, bool]
@@ -154,6 +156,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
 
   sleep(500)
   echo "fruit-market: writing results and replay"
+  state.capture.finishCapture(results)
   writeArtifact(runtimeConfig.resultsUri, $results, "application/json",
     "COGAME_RESULTS_METHOD")
   writeArtifact(runtimeConfig.replayUri, replayData, "application/json",
@@ -232,6 +235,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy: Sim
         prompts: array[Seats, string]
         scripts: array[Seats, ScriptKind]
+        nativeScripts: array[Seats, ScriptKind]
         connected: array[Seats, bool]
         external: array[Seats, bool]
       withLock stateLock:
@@ -246,6 +250,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         prompts = state.prompts
         scripts = state.scripted
+        if state.capture != nil: nativeScripts = state.scripted
         connected = state.connected
         external = state.external
         for slot in 0 ..< Seats:
@@ -263,7 +268,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       ## The slow part (one parallel batch of eight) runs OUTSIDE the lock on a
       ## snapshot; only this thread mutates the sim, so it cannot go stale.
-      var orders = client.decideAll(simCopy, prompts, scripts, connected, state.selection)
+      var orders = client.decideAll(simCopy, prompts, scripts, connected,
+        state.selection, state.capture)
       let orderDeadline = lastBatchStart +
         2.0 * config.llmTimeoutSeconds.float + 2.0
       while epochTime() < orderDeadline:
@@ -286,6 +292,19 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               orders[slot] = scriptedOrder(state.sim, slot, skHauler)
               orders[slot].source = osFallback
         state.sim.setRoundOrders(orders)
+        if state.capture != nil:
+          for slot in 0 ..< Seats:
+            let origin = case orders[slot].source
+              of osLlm, osRetry: aoModel
+              of osExternal: aoUnknown
+              of osFallback: aoFallback
+              of osScripted:
+                if nativeScripts[slot] == skNone: aoFallback else: aoTeacher
+            state.capture.applied(slot, simCopy.tick,
+              state.sim.cogs[slot].order.orderJson(), origin,
+              if origin == aoTeacher: "scripted-" & $nativeScripts[slot]
+              elif origin == aoUnknown: "external-player"
+              else: "engine-fruit-market-fallback")
         state.sim.runRound()
         for slot in 0 ..< Seats:
           state.orderReceived[slot] = false
@@ -474,6 +493,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.selection = promptSelection(parseJson(runtimeConfig.config))
   state.config = config
   state.sim = initSim(config, policyNames)
+  state.capture = newRuntimeCapture(state.sim)
   for slot in 0 ..< Seats:
     state.scripted[slot] = skNone
   let router = buildRouter()

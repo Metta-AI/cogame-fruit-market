@@ -48,6 +48,48 @@ inference settings. Measure win rate, invalid-order rate, fallback rate, request
 counts, and completion rates on familiar and held-out wording. These local checks
 do not establish learned robustness or live-provider performance.
 
+## Native private capture
+
+The hosted server writes the bitworld decision-trajectory format when the runtime
+supplies `COGAME_SAVE_TRAJECTORY_URI` and immutable episode/version/source identity.
+It retains exact parallel native requests, received body bytes and headers,
+platform call IDs, retries, seat-private observations and operator guidance.
+Attempt latency is parallel batch wall time, an upper bound for each response;
+use authenticated call receipts for per-call latency. The
+simulator records the actual applied order after installation. Scripted teachers,
+unknown external players and engine fallbacks remain distinct; scripted policies
+are not automatically approved as teachers. No private request enters spectator
+replays or changes the existing player interface.
+
+Parser-normalized proposals remain visible with their original parsed fields and
+actual applied action, but have no selected training target. They are rejected
+targets, not substituted baseline actions. The native JSON parser, decoder,
+simultaneous batch timing, game rules and default turn limits are unchanged.
+
+Native family identity hashes the initial farm allocation, derived geography and
+all consequential physical configuration. Only initialization consumes the farm
+shuffle RNG. Seeds producing the same farms and rules stay together across
+policies, aliases and wordings. The private family hash reveals no hidden farmer
+types to a player. Historical offline exports above retain their original seed
+labels and source pins; audit those labels before claiming independent evaluation.
+
+Run complete local native fixtures with compiled game/player binaries:
+
+```sh
+python3 tools/test_native_capture.py /path/to/fruit-market /path/to/fruit-market-player /new/private/output
+# Other complete cohorts: --mode invalid, --mode 429, --mode normalized, --no-capture.
+nim c -d:release --path:src -o:/tmp/fruit-market-verify tools/verify_native_capture.nim
+/tmp/fruit-market-verify /new/private/output/config.json /new/private/output/trajectory.jsonl
+/tmp/fruit-market-verify --families
+```
+
+The independent native reconstruction regenerates every captured seat observation,
+rendered message, applied order and terminal outcome through production source.
+Fixtures use loopback-only synthetic provider responses and no real credentials;
+their IDs are never authenticated receipts or learning examples. Fresh complete
+hosted model games, archived receipt admission, target-quality review and frozen
+physical-family/partner evaluation are still required for posttraining readiness.
+
 # Numeric reinforcement learning
 
 Compile the persistent bridge and pass the binary, manifest, and variant to
